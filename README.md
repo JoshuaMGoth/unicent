@@ -50,35 +50,55 @@ Any host can connect to any client — all combinations work together.
 
 ## Quick Start
 
-### Option 1: One-Command Installer
+### Option 1: One-Command Installer (Remote)
 
-Pick the right installer for your OS and role:
+Install directly from GitHub — no clone needed:
 
+**Debian / Ubuntu:**
 ```bash
-# Debian/Ubuntu — Host
-sudo bash installers/debian/install-host.sh
+# Host
+curl -fsSL https://raw.githubusercontent.com/JoshuaMGoth/unicent/main/installers/debian/install-host.sh | sudo bash
 
-# Debian/Ubuntu — Client
-sudo bash installers/debian/install-client.sh
+# Client
+curl -fsSL https://raw.githubusercontent.com/JoshuaMGoth/unicent/main/installers/debian/install-client.sh | sudo bash
+```
 
-# Arch Linux — Host
-sudo bash installers/arch/install-host.sh
+**Arch Linux:**
+```bash
+# Host
+curl -fsSL https://raw.githubusercontent.com/JoshuaMGoth/unicent/main/installers/arch/install-host.sh | sudo bash
 
-# Arch Linux — Client
-sudo bash installers/arch/install-client.sh
+# Client
+curl -fsSL https://raw.githubusercontent.com/JoshuaMGoth/unicent/main/installers/arch/install-client.sh | sudo bash
+```
 
-# macOS — Host
-bash installers/macos/install-host.sh
+**Ubuntu:**
+```bash
+# Host
+curl -fsSL https://raw.githubusercontent.com/JoshuaMGoth/unicent/main/installers/ubuntu/install-host.sh | sudo bash
 
-# macOS — Client
-bash installers/macos/install-client.sh
+# Client
+curl -fsSL https://raw.githubusercontent.com/JoshuaMGoth/unicent/main/installers/ubuntu/install-client.sh | sudo bash
+```
 
-# Windows — Host (PowerShell as Admin)
+**macOS:**
+```bash
+# Host
+curl -fsSL https://raw.githubusercontent.com/JoshuaMGoth/unicent/main/installers/macos/install-host.sh | bash
+
+# Client
+curl -fsSL https://raw.githubusercontent.com/JoshuaMGoth/unicent/main/installers/macos/install-client.sh | bash
+```
+
+**Windows (PowerShell as Administrator):**
+```powershell
+# Host
 Set-ExecutionPolicy Bypass -Scope Process -Force
-.\installers\windows\install-host.ps1
+irm https://raw.githubusercontent.com/JoshuaMGoth/unicent/main/installers/windows/install-host.ps1 | iex
 
-# Windows — Client (PowerShell as Admin)
-.\installers\windows\install-client.ps1
+# Client
+Set-ExecutionPolicy Bypass -Scope Process -Force
+irm https://raw.githubusercontent.com/JoshuaMGoth/unicent/main/installers/windows/install-client.ps1 | iex
 ```
 
 ### Option 2: Manual Setup
@@ -141,10 +161,11 @@ Options:
 | Shortcut | Action |
 |----------|--------|
 | Ctrl+Alt+S | Switch to next machine |
-| Ctrl+Alt+1 | Switch to machine #1 (host) |
-| Ctrl+Alt+2 | Switch to machine #2 (first client) |
-| Ctrl+Alt+3-5 | Switch to machine #3-5 |
-| Ctrl+Alt+C | Sync clipboard to all clients |
+| Ctrl+Alt+1 | Switch to host (machine #1) |
+| Ctrl+Alt+2–9 | Switch to client #2 through #9 |
+| Ctrl+Alt+C | Sync clipboard between all machines |
+| Ctrl+Alt+W | Wake & activate the current client's display |
+| Ctrl+Alt+R | Refresh screen layout |
 
 ### System Tray
 
@@ -232,6 +253,14 @@ unicent/
 | macOS | python3, pyobjc-framework-Quartz, rumps |
 | Windows | python3, pystray, Pillow |
 
+## Website
+
+[joshuagoth.com/downloads/unicent](https://joshuagoth.com/downloads/unicent/)
+
 ## License
 
 MIT
+
+---
+
+*A [JoshuaGoth Software](https://joshuagoth.com) project.*

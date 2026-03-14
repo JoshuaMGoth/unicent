@@ -309,7 +309,7 @@ def main():
     icon = pystray.Icon(
         name="unicent-host",
         icon=img,
-        title=f"{__app_name__} Host v{__version__}",
+        title=__app_name__,
         menu=_build_menu(),
     )
     _icon_ref[0] = icon

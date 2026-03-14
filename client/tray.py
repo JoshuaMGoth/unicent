@@ -225,14 +225,14 @@ class _PystrayClientTray:
 
     def start(self):
         try:
-            icon_image = _load_u_icon(64)
+            icon_image = _load_u_icon(128)
         except Exception as e:
             log.warning(f"Could not load tray icon: {e}")
             return
         self._icon = pystray.Icon(
             name='unicent-client',
             icon=icon_image,
-            title=f'{__app_name__} Client v{__version__}',
+            title=__app_name__,
             menu=self._build_menu(),
         )
         self._thread = threading.Thread(target=self._run_icon, daemon=True)
@@ -256,9 +256,7 @@ class _PystrayClientTray:
         self._active = active
         if self._icon:
             self._icon.menu = self._build_menu()
-            tooltip = f'{__app_name__} — Receiving input' if active else (
-                f'{__app_name__} — Connected' if connected
-                else f'{__app_name__} — Disconnected')
+            tooltip = __app_name__
             self._icon.title = tooltip
             try:
                 self._icon.update_menu()

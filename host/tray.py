@@ -344,7 +344,7 @@ class HostTray:
                 os.environ['DISPLAY'] = ':0'
 
         try:
-            icon_image = _load_u_icon(64)
+            icon_image = _load_u_icon(128)
         except Exception as e:
             log.warning(f"Could not load tray icon: {e}")
             return
@@ -352,7 +352,7 @@ class HostTray:
         self._icon = pystray.Icon(
             name='unicent-host',
             icon=icon_image,
-            title=f'{__app_name__} Host v{__version__}',
+            title=__app_name__,
             menu=self._build_menu(),
         )
         self._tray_thread = threading.Thread(

@@ -1,206 +1,142 @@
-#!/usr/bin/env python3
 """
-UniCent Client — macOS entry point.
+UniCent Client — cross-platform.
 
-Connects to a UniCent host and receives mouse/keyboard events,
-injecting them into macOS via Quartz (CoreGraphics).
+Connects to a UniCent host and injects received mouse/keyboard events
+into the local system.
 
 Usage:
-    python3 -m client.main [--host HOST_IP] [--port PORT] [--no-tls]
-
-The client will auto-discover hosts on the network if no --host is specified.
+    python -m client.main --host <HOST_IP> [--port PORT]
+                          [--no-tls] [--no-tray] [-v]
 """
 
-import sys
-import os
 import argparse
 import logging
+import os
+import platform
 import signal
-import time
-import threading
 import socket
+import sys
+import threading
+import time
+from typing import Optional
 
-# Add project root to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from shared.discovery import DiscoveryBeacon, DiscoveryListener
 from client.connection import HostConnection
-from client.screen_manager import get_macos_screens, get_clipboard_content, set_clipboard_content
+from client.input_inject import InputInjector, check_accessibility_permissions
+from client.screen_manager import get_client_screens, get_clipboard_content, set_clipboard_content
 
-try:
-    from client.tray import ClientTray, RUMPS_AVAILABLE as TRAY_AVAILABLE
-except ImportError:
-    TRAY_AVAILABLE = False
+log = logging.getLogger(__name__)
 
-log = logging.getLogger('unicent.client')
+_SYSTEM = platform.system()
 
 
 class UniCentClient:
-    """Main client application controller for macOS."""
+    """
+    Main client controller.
 
-    def __init__(self, host_addr=None, host_port=27183,
-                 use_tls=True, cert_dir='certs'):
+    1.  Detects local screens.
+    2.  Connects to the host via TCP.
+    3.  Receives input events and injects them locally.
+    4.  Handles clipboard sync, cursor warp, active/inactive states.
+    """
+
+    def __init__(self, host_addr: str = '', host_port: int = 27183,
+                 use_tls: bool = True, use_tray: bool = True,
+                 cert_file: str = '', ca_file: str = '',
+                 verbose: bool = False):
         self.host_addr = host_addr
         self.host_port = host_port
         self.use_tls = use_tls
-        self.cert_dir = cert_dir
-        self._running = False
-        self._is_active = False  # Whether this client is being controlled
+        self.use_tray = use_tray
+        self.verbose = verbose
+
+        # TLS
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.cert_file = cert_file or os.path.join(base_dir, 'certs', 'client.crt')
+        self.ca_file = ca_file or os.path.join(base_dir, 'certs', 'ca.crt')
+        if not use_tls:
+            self.cert_file = self.ca_file = ''
 
         # Components
-        self.connection: HostConnection = None  # type: ignore
-        self.injector = None  # InputInjector (lazy init)
-        self.beacon: DiscoveryBeacon = None  # type: ignore
-        self.listener: DiscoveryListener = None  # type: ignore
+        self.connection: Optional[HostConnection] = None
+        self.injector = None
+        self.discovery_listener = None
 
-        # Track state
-        self._screens = []
-        self._clipboard = ''
-        self._use_tray = True  # Use tray/menu bar icon by default
+        # State
+        self._running = False
+        self._active = False
+        self._hostname = socket.gethostname()
+        self._screens: list = []
+        self._lock = threading.Lock()
+
+    # ──── Lifecycle ────────────────────────────────────────
 
     def run(self):
-        """Main entry point."""
+        """Main entry-point. Blocks until quit."""
         self._running = True
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
-
-        # If tray is available and enabled, use it
-        if self._use_tray and TRAY_AVAILABLE:
-            tray = ClientTray(self)
-            tray.run()  # This blocks on macOS main thread
-            return
-
-        # Otherwise run in terminal mode
-        self._run_terminal_mode()
-
-    def _start_background(self):
-        """Start all client logic (called from tray wrapper, runs in bg thread)."""
-        self._running = True
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
-
-        self._init_components()
-        self._connect_to_host()
-
-        # Background main loop (clipboard monitoring)
-        try:
-            last_clipboard_check = 0
-            while self._running:
-                time.sleep(0.5)
-                now = time.time()
-                if now - last_clipboard_check > 2.0:
-                    last_clipboard_check = now
-                    self._check_clipboard()
-        except Exception:
-            pass
-
-    def _run_terminal_mode(self):
-        """Run in terminal mode (no tray icon)."""
-
         self._print_banner()
 
-        self._init_components()
-        self._connect_to_host()
+        # 1. Check permissions (macOS accessibility, etc.)
+        if not check_accessibility_permissions():
+            print("  ⚠  Accessibility permissions not granted.")
+            print("     On macOS: System Settings → Privacy → Accessibility")
+            print("     On Linux: ensure xdotool is installed")
+            print()
 
-        print(f"\n{'='*60}")
-        print(f"  UniCent CLIENT running")
-        print(f"  Connecting to host: {self.host_addr}:{self.host_port}")
-        print(f"{'='*60}\n")
+        # 2. Detect screens
+        self._screens = get_client_screens()
+        self._print_screens()
 
-        # 8. Main loop (clipboard monitoring, etc.)
+        # 3. Create injector
+        self.injector = InputInjector()
+        log.info(f"Input injector ready ({_SYSTEM})")
+
+        # 4. Optionally start with tray
+        if self.use_tray:
+            try:
+                from client.tray import ClientTray, TRAY_AVAILABLE
+                if TRAY_AVAILABLE:
+                    tray = ClientTray(self)
+                    tray.run()  # May block on macOS (rumps)
+                    return
+            except ImportError:
+                log.warning("Tray library not available")
+            except Exception as e:
+                log.warning(f"Tray icon disabled: {e}")
+
+        # 5. No tray – run in terminal mode
+        self._run_terminal_mode()
+
+    def _run_terminal_mode(self):
+        """Run without tray icon — terminal-only."""
+        self._start_background()
         try:
-            last_clipboard_check = 0
             while self._running:
                 time.sleep(0.5)
-                now = time.time()
-                if now - last_clipboard_check > 2.0:
-                    last_clipboard_check = now
-                    self._check_clipboard()
         except KeyboardInterrupt:
-            pass
+            print("\n  Interrupted.")
         finally:
             self._shutdown()
 
-    def _init_components(self):
-        """Initialize all client components (input injector, screens, discovery)."""
-
-        # 1. Check accessibility permissions
-        print("  Checking accessibility permissions...")
+    def _start_background(self):
+        """Start connection, discovery, and injector in the background."""
+        # Get clipboard for handshake
+        clipboard = ''
         try:
-            from client.input_inject import (
-                InputInjector, check_accessibility_permissions,
-                request_accessibility_permissions,
-            )
-            if not check_accessibility_permissions():
-                request_accessibility_permissions()
-                print("\n  Please grant permissions and restart.")
-                print("  (You can continue, but input injection may not work)\n")
-        except Exception as e:
-            log.warning(f"Could not check permissions: {e}")
+            clipboard = get_clipboard_content()
+        except Exception:
+            pass
 
-        # 2. Initialize input injector
-        print("  Initializing input injector...")
-        try:
-            from client.input_inject import InputInjector
-            self.injector = InputInjector()
-            print("  Input injector ready")
-        except Exception as e:
-            print(f"  [WARNING] Input injector failed: {e}")
-            print("  Will attempt to use fallback methods")
-
-        # 3. Detect screens
-        print("  Detecting screens...")
-        self._screens = get_macos_screens()
-        for i, s in enumerate(self._screens):
-            print(f"    Monitor {i+1}: {s['width']}x{s['height']} "
-                  f"(scale: {s.get('scale', 1)}x) - {s.get('name', 'unknown')}")
-
-        # 4. Get clipboard
-        self._clipboard = get_clipboard_content()
-
-        # 5. Start discovery
-        self.beacon = DiscoveryBeacon(
-            service_port=0,
-            hostname=socket.gethostname(),
-            role='client',
-            extra={'screens': len(self._screens)},
-        )
-        self.beacon.start()
-
-    def _connect_to_host(self):
-        """Find host and establish connection."""
-
-        # 6. Find host if not specified
-        if not self.host_addr:
-            print("\n  Searching for host on network...")
-            self.host_addr = self._discover_host()
-            if not self.host_addr:
-                print("  [ERROR] No host found on network!")
-                print("  Use --host <IP> to specify the host address.")
-                self._shutdown()
-                return
-
-        # 7. Set up connection
-        ca_file = os.path.join(self.cert_dir, 'ca.crt') if self.use_tls else None
-        cert_file = os.path.join(self.cert_dir, 'client.crt') if self.use_tls else None
-
-        if self.use_tls and ca_file and not os.path.exists(ca_file):
-            print(f"\n  [WARNING] TLS certificates not found in {self.cert_dir}/")
-            print("  Continuing without encryption...\n")
-            ca_file = None
-            cert_file = None
-
+        # Start connection
         self.connection = HostConnection(
             host_addr=self.host_addr,
             host_port=self.host_port,
-            ca_file=ca_file,
-            cert_file=cert_file,
-            hostname=socket.gethostname(),
+            cert_file=self.cert_file if self.use_tls else '',
+            ca_file=self.ca_file if self.use_tls else '',
+            hostname=self._hostname,
         )
         self.connection.set_screens(self._screens)
-        self.connection.set_clipboard(self._clipboard)
+        self.connection.set_clipboard(clipboard)
 
-        # Set up callbacks
         self.connection.on_connected = self._on_connected
         self.connection.on_disconnected = self._on_disconnected
         self.connection.on_mouse_move = self._on_mouse_move
@@ -212,177 +148,147 @@ class UniCentClient:
         self.connection.on_cursor_warp = self._on_cursor_warp
         self.connection.on_clipboard = self._on_clipboard
 
-        # Start connection
         self.connection.start()
+
+        # Auto-discovery (listen for hosts if no address given)
+        if not self.host_addr:
+            try:
+                from shared.discovery import DiscoveryListener
+                self.discovery_listener = DiscoveryListener(
+                    on_discovered=self._on_host_discovered,
+                    filter_role='host',
+                )
+                self.discovery_listener.start()
+                print("  Listening for hosts via auto-discovery...")
+            except Exception as e:
+                log.warning(f"Discovery disabled: {e}")
+
+        print("  Connecting to host...")
+        print()
+
+    def _shutdown(self):
+        self._running = False
+        print("\n  Shutting down...")
+        if self.connection:
+            self.connection.stop()
+        if self.discovery_listener:
+            self.discovery_listener.stop()
+        print("  Goodbye.")
+
+    # ──── Connection callbacks ─────────────────────────────
+
+    def _on_connected(self):
+        log.info("Connected to host")
+        print(f"\n  ● Connected to {self.host_addr}:{self.host_port}")
+
+    def _on_disconnected(self):
+        self._active = False
+        log.info("Disconnected from host")
+        print("\n  ○ Disconnected from host")
+
+    # ──── Input event callbacks ────────────────────────────
+
+    def _on_mouse_move(self, dx: int, dy: int):
+        if self._active and self.injector:
+            self.injector.move_mouse_relative(dx, dy)
+
+    def _on_mouse_move_abs(self, x: int, y: int):
+        if self._active and self.injector:
+            self.injector.move_mouse_absolute(x, y)
+
+    def _on_mouse_button(self, button: int, state: int):
+        if self._active and self.injector:
+            self.injector.mouse_button(button, state)
+
+    def _on_mouse_scroll(self, dx: int, dy: int):
+        if self._active and self.injector:
+            self.injector.scroll(dx, dy)
+
+    def _on_key_event(self, keycode: int, state: int):
+        if self._active and self.injector:
+            self.injector.key_event(keycode, state)
+
+    def _on_switch_active(self, target: str, x: int, y: int):
+        """Host is switching control to/from us."""
+        if target and target != '':
+            self._active = True
+            log.info(f"Now active — receiving input (cursor at {x},{y})")
+            print(f"\n  ⚡ Active — receiving input (cursor at {x},{y})")
+            if self.injector:
+                self.injector.move_mouse_absolute(x, y)
+        else:
+            self._active = False
+            log.info("Now inactive")
+            print("\n  ● Inactive — host has control")
+
+    def _on_cursor_warp(self, x: int, y: int):
+        if self.injector:
+            self.injector.move_mouse_absolute(x, y)
+            log.debug(f"Cursor warped to ({x}, {y})")
+
+    def _on_clipboard(self, content: str):
+        if content:
+            try:
+                set_clipboard_content(content)
+                log.info(f"Clipboard received ({len(content)} chars)")
+            except Exception as e:
+                log.warning(f"Failed to set clipboard: {e}")
+
+    # ──── Discovery ────────────────────────────────────────
+
+    def _on_host_discovered(self, info: dict):
+        """Called when a host is found via discovery."""
+        host_ip = info.get('ip', '')
+        host_port = info.get('port', 27183)
+        hostname = info.get('hostname', host_ip)
+        log.info(f"Discovered host: {hostname} at {host_ip}:{host_port}")
+        print(f"\n  Discovered host: {hostname} ({host_ip}:{host_port})")
+        if not self.host_addr:
+            self.host_addr = host_ip
+            self.host_port = host_port
+            if self.connection:
+                self.connection.host_addr = host_ip
+                self.connection.host_port = host_port
+
+    # ──── Display helpers ──────────────────────────────────
 
     def _print_banner(self):
         print()
         print("  ╔══════════════════════════════════════╗")
-        print("  ║        UniCent CLIENT v1.0          ║")
-        print("  ║          macOS Input Receiver         ║")
+        print("  ║          UniCent Client              ║")
         print("  ╚══════════════════════════════════════╝")
         print()
+        tls_str = 'TLS' if self.use_tls else 'NO TLS'
+        print(f"  Hostname : {self._hostname}")
+        host_display = self.host_addr or '(auto-discover)'
+        print(f"  Host     : {host_display}:{self.host_port} ({tls_str})")
+        print(f"  Platform : {_SYSTEM} ({platform.machine()})")
+        print()
 
-    def _discover_host(self, timeout: float = 10.0) -> str:
-        """Try to auto-discover a host on the network."""
-        found_event = threading.Event()
-        host_info = {}
+    def _print_screens(self):
+        print("  Screens:")
+        for s in self._screens:
+            print(f"    {s.get('name', '?')}: {s['width']}x{s['height']}"
+                  f" @ +{s.get('x', 0)}+{s.get('y', 0)}"
+                  f" (scale {s.get('scale', 1.0)}x)")
+        print()
 
-        def on_host_found(info):
-            if info.get('role') == 'host':
-                host_info.update(info)
-                found_event.set()
 
-        listener = DiscoveryListener(
-            on_discovered=on_host_found,
-            filter_role='host',
-        )
-        listener.start()
-
-        print(f"    Waiting up to {timeout}s for host broadcast...")
-        found = found_event.wait(timeout=timeout)
-        listener.stop()
-
-        if found:
-            addr = host_info.get('ip', '')
-            port = host_info.get('port', 27183)
-            hostname = host_info.get('hostname', addr)
-            print(f"    Found host: {hostname} at {addr}:{port}")
-            self.host_port = port
-            return addr
-
-        return ''
-
-    # --- Connection callbacks ---
-
-    def _on_connected(self):
-        """Called when connected to the host."""
-        print("\n  [+] Connected to host!")
-        print("      Waiting for input control...\n")
-
-    def _on_disconnected(self):
-        """Called when disconnected from the host."""
-        self._is_active = False
-        if self.injector:
-            self.injector.release_all()
-        print("\n  [-] Disconnected from host")
-        print("      Attempting to reconnect...\n")
-
-    def _on_mouse_move(self, dx: int, dy: int):
-        """Handle relative mouse movement from host."""
-        if self.injector and self._is_active:
-            self.injector.move_mouse_relative(dx, dy)
-
-    def _on_mouse_move_abs(self, x: int, y: int):
-        """Handle absolute mouse movement from host."""
-        if self.injector and self._is_active:
-            self.injector.move_mouse_absolute(x, y)
-
-    def _on_mouse_button(self, button: int, state: int):
-        """Handle mouse button from host."""
-        if self.injector and self._is_active:
-            self.injector.mouse_button(button, state)
-
-    def _on_mouse_scroll(self, dx: int, dy: int):
-        """Handle scroll from host."""
-        if self.injector and self._is_active:
-            self.injector.scroll(dx, dy)
-
-    def _on_key_event(self, keycode: int, state: int):
-        """Handle keyboard event from host."""
-        if self.injector and self._is_active:
-            self.injector.key_event(keycode, state)
-
-    def _on_switch_active(self, target: str, cursor_x: int, cursor_y: int):
-        """Handle switch-active notification from host."""
-        if target and target != '':
-            self._is_active = True
-            print(f"  [>] Now receiving input (cursor at {cursor_x}, {cursor_y})")
-        else:
-            self._is_active = False
-            if self.injector:
-                self.injector.release_all()
-            print("  [<] Input control released")
-
-    def _on_cursor_warp(self, x: int, y: int):
-        """Handle cursor warp from host."""
-        if self.injector:
-            self.injector.warp_cursor(x, y)
-            log.debug(f"Cursor warped to ({x}, {y})")
-
-    def _on_clipboard(self, content: str):
-        """Handle clipboard data from host."""
-        if content and content != self._clipboard:
-            self._clipboard = content
-            set_clipboard_content(content)
-            log.info(f"Clipboard updated: {len(content)} chars")
-
-    def _check_clipboard(self):
-        """Check if local clipboard has changed and sync to host."""
-        try:
-            current = get_clipboard_content()
-            if current and current != self._clipboard:
-                self._clipboard = current
-                if self.connection and self.connection.connected:
-                    self.connection.send_clipboard(current)
-                    log.debug("Clipboard synced to host")
-        except Exception:
-            pass
-
-    def _signal_handler(self, signum, frame):
-        """Handle shutdown signals."""
-        print("\n  Shutting down...")
-        self._running = False
-
-    def _shutdown(self):
-        """Clean shutdown."""
-        print("  Stopping connection...")
-        if self.connection:
-            self.connection.stop()
-        print("  Stopping discovery...")
-        if self.beacon:
-            self.beacon.stop()
-        if self.listener:
-            self.listener.stop()
-        if self.injector:
-            self.injector.release_all()
-        print("  Goodbye!\n")
-
+# ────────────────────────────────────────────────────────────
+#  CLI entry-point
+# ────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(
-        description='UniCent Client - Receive mouse & keyboard over network',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__,
-    )
-    parser.add_argument(
-        '--host', type=str, default=None,
-        help='Host IP address (auto-discover if not specified)',
-    )
-    parser.add_argument(
-        '-p', '--port', type=int, default=27183,
-        help='Host port (default: 27183)',
-    )
-    parser.add_argument(
-        '--no-tls', action='store_true',
-        help='Disable TLS encryption',
-    )
-    parser.add_argument(
-        '--certs', default='certs',
-        help='Directory containing TLS certificates (default: certs)',
-    )
-    parser.add_argument(
-        '-v', '--verbose', action='store_true',
-        help='Enable debug logging',
-    )
-    parser.add_argument(
-        '--no-tray', action='store_true',
-        help='Disable menu bar icon (terminal-only mode)',
-    )
-
+    parser = argparse.ArgumentParser(description='UniCent Client')
+    parser.add_argument('--host', default='', help='Host IP address / hostname')
+    parser.add_argument('--port', type=int, default=27183, help='Host TCP port (default 27183)')
+    parser.add_argument('--no-tls', action='store_true', help='Disable TLS encryption')
+    parser.add_argument('--no-tray', action='store_true', help='Disable system tray / menu bar icon')
+    parser.add_argument('--cert', default='', help='Client TLS certificate file')
+    parser.add_argument('--ca', default='', help='CA certificate file')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Verbose logging')
     args = parser.parse_args()
 
-    # Configure logging
     level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(
         level=level,
@@ -390,14 +296,17 @@ def main():
         datefmt='%H:%M:%S',
     )
 
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+
     client = UniCentClient(
         host_addr=args.host,
         host_port=args.port,
         use_tls=not args.no_tls,
-        cert_dir=args.certs,
+        use_tray=not args.no_tray,
+        cert_file=args.cert,
+        ca_file=args.ca,
+        verbose=args.verbose,
     )
-    if args.no_tray:
-        client._use_tray = False
     client.run()
 
 

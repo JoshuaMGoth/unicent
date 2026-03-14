@@ -281,11 +281,11 @@ def show_bug_report_dialog():
     frame.pack(fill='both', expand=True)
 
     _ttk.Label(frame, text='Report a Bug', style='Header.TLabel').pack(pady=(0, 8))
-    _ttk.Label(frame, text=f'Reports are sent to {__support_email__}',
+    _ttk.Label(frame, text='Reports are submitted directly — no email required.',
                style='Sub.TLabel').pack(pady=(0, 12))
 
     # Description
-    _ttk.Label(frame, text='What happened? (optional)').pack(anchor='w')
+    _ttk.Label(frame, text='What happened?').pack(anchor='w')
     desc_text = tk.Text(frame, width=55, height=3, wrap='word',
                         bg=entry_bg, fg=fg, insertbackground=fg,
                         relief='flat', borderwidth=1, highlightthickness=1,
@@ -293,7 +293,7 @@ def show_bug_report_dialog():
     desc_text.pack(fill='x', pady=(4, 12))
 
     # Error text
-    _ttk.Label(frame, text='Paste error / log output here:').pack(anchor='w')
+    _ttk.Label(frame, text='Paste error / log output here (optional):').pack(anchor='w')
     error_text = _scrolledtext.ScrolledText(
         frame, width=55, height=12, wrap='word',
         bg=entry_bg, fg=fg, insertbackground=fg,
@@ -314,11 +314,11 @@ def show_bug_report_dialog():
     def _on_send():
         err = error_text.get('1.0', 'end-1c').strip()
         desc = desc_text.get('1.0', 'end-1c').strip()
-        if not err:
-            status_var.set('Please paste an error or log output.')
+        if not desc and not err:
+            status_var.set('Please describe the issue or paste an error.')
             return
         send_btn.configure(state='disabled')
-        status_var.set('Opening email client...')
+        status_var.set('Submitting report...')
 
         def _on_result(success, message):
             root.after(0, lambda: _handle_result(success, message))
@@ -328,26 +328,25 @@ def show_bug_report_dialog():
     def _handle_result(success, message):
         if success:
             status_var.set(message)
-            root.after(2000, root.destroy)
+            root.after(3000, root.destroy)
         else:
             # Show the formatted report for manual copy
-            status_var.set('Could not open email client. Report copied below.')
+            status_var.set(message)
             err = error_text.get('1.0', 'end-1c').strip()
             desc = desc_text.get('1.0', 'end-1c').strip()
             report = format_report_text(err, desc)
             error_text.configure(state='normal')
             error_text.delete('1.0', 'end')
             error_text.insert('1.0', report)
-            error_text.configure(state='disabled')
-            send_btn.configure(state='normal', text='Copy to Clipboard',
+            send_btn.configure(state='normal', text='Copy & Report Manually',
                                command=lambda: _copy_report(report))
 
     def _copy_report(text):
         root.clipboard_clear()
         root.clipboard_append(text)
-        status_var.set('Copied to clipboard! Paste into an email.')
+        status_var.set('Copied! Open https://github.com/JoshuaMGoth/unicent/issues to submit.')
 
-    send_btn = _ttk.Button(btn_frame, text='Send Report',
+    send_btn = _ttk.Button(btn_frame, text='Submit Report',
                            style='Accent.TButton', command=_on_send)
     send_btn.pack(side='right', padx=(4, 0))
     _ttk.Button(btn_frame, text='Cancel', command=root.destroy).pack(side='right')

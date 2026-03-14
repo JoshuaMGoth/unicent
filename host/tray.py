@@ -299,6 +299,8 @@ class HostTray:
             self._toggle_side()
         elif action == 'sync_clipboard':
             self.host._hotkey_clipboard_sync()
+        elif action == 'refresh_layout':
+            self._refresh_layout()
         elif action == 'show_about':
             self._show_about()
         elif action == 'show_settings':
@@ -422,6 +424,11 @@ class HostTray:
         items.append(MenuItem(
             'Sync Clipboard      Ctrl+Alt+C',
             lambda: self.host._hotkey_clipboard_sync()))
+
+        # ── Refresh Layout ──
+        items.append(MenuItem(
+            'Refresh Layout      Ctrl+Alt+R',
+            lambda: self._refresh_layout()))
         items.append(Menu.SEPARATOR)
 
         # ── Client info ──
@@ -473,6 +480,13 @@ class HostTray:
     def _on_quit(self):
         self.host._hotkey_quit()
         self.stop()
+
+    def _refresh_layout(self):
+        try:
+            self.host.refresh_layout()
+            print("\n  Layout refreshed from tray")
+        except Exception as e:
+            log.warning(f"Could not refresh layout: {e}")
 
     def _toggle_side(self):
         current = getattr(self.host, 'client_side', 'right')

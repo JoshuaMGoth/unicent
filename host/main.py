@@ -26,7 +26,7 @@ from host.server import HostServer
 from host.input_capture import InputCapture, find_input_devices, HotkeyDetector
 from host.screen_manager import ScreenLayout, get_host_screen_info
 from shared.keymap import (
-    CTRL_KEYS, ALT_KEYS, KEY_S, KEY_C, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5,
+    CTRL_KEYS, ALT_KEYS, KEY_S, KEY_C, KEY_R, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5,
 )
 
 log = logging.getLogger(__name__)
@@ -352,6 +352,9 @@ class UniCentHost:
         self.hotkey.register(
             'clipboard', [CTRL_KEYS, ALT_KEYS], KEY_C,
             self._hotkey_clipboard_sync)
+        self.hotkey.register(
+            'refresh', [CTRL_KEYS, ALT_KEYS], KEY_R,
+            self._hotkey_refresh_layout)
 
         # Ctrl+Alt+1..5 → switch to machine index
         for i, key in enumerate([KEY_1, KEY_2, KEY_3, KEY_4, KEY_5]):
@@ -390,6 +393,54 @@ class UniCentHost:
         except Exception as e:
             log.warning(f"Clipboard sync failed: {e}")
 
+    def _hotkey_refresh_layout(self):
+        """Re-detect host screens, re-read cursor position, recalculate layout."""
+        self.refresh_layout()
+        print("\n  [Hotkey] Layout refreshed")
+
+    def refresh_layout(self):
+        """Re-detect screens and resync cursor with the physical position.
+
+        Call this when a client connects/disconnects or whenever the
+        edge boundaries feel wrong.
+        """
+        # 1. Re-detect host screens
+        screens = get_host_screen_info()
+        self.layout.set_host_screens(screens)
+
+        # 2. Re-add all current clients (their screens haven't changed)
+        for cid, client in self.server.clients.items():
+            if client.screens:
+                self.layout.add_client_screens(cid, client.screens)
+
+        # 3. Resync cursor to the physical position
+        self._resync_cursor()
+
+        # 4. Update server with new layout
+        self.server.set_host_info(
+            self._host_hostname,
+            [s.to_dict() for s in self.layout.machines[0].screens],
+            self.layout.get_layout_info(),
+        )
+
+        log.info("Layout refreshed")
+        self._print_layout()
+        if self.tray:
+            self.tray.update_menu()
+
+    def _resync_cursor(self):
+        """Re-read the physical cursor position and update the layout.
+
+        Only meaningful when we're controlling the host (local), as
+        we can read the hardware cursor position.
+        """
+        if self._controlling_remote:
+            return  # Can't read remote cursor position
+        pos = _read_cursor_position()
+        if pos:
+            self.layout.init_cursor_at_host(pos[0], pos[1])
+            log.info(f"Cursor resynced to physical position: {pos}")
+
     def _hotkey_quit(self):
         print("\n  [Hotkey] Quitting...")
         self._running = False
@@ -399,6 +450,10 @@ class UniCentHost:
     def _on_client_connected(self, client_id: str, screens: list):
         log.info(f"Client connected: {client_id}")
         self.layout.add_client_screens(client_id, screens)
+
+        # Resync cursor with physical position so edge detection is accurate
+        self._resync_cursor()
+
         # Update server with new layout
         self.server.set_host_info(
             self._host_hostname,
@@ -416,6 +471,10 @@ class UniCentHost:
         self.layout.remove_client(client_id)
         if was_controlling:
             self._switch_to_host()
+
+        # Resync cursor with physical position after layout change
+        self._resync_cursor()
+
         print(f"\n  ✦ Client disconnected: {client_id}")
         self._print_layout()
         if self.tray:
@@ -475,6 +534,7 @@ class UniCentHost:
         print("    Ctrl+Alt+S       — Switch to next machine")
         print("    Ctrl+Alt+1..5    — Switch to machine #1..#5")
         print("    Ctrl+Alt+C       — Sync clipboard")
+        print("    Ctrl+Alt+R       — Refresh layout / resync edges")
         print()
         print("  Waiting for clients...")
         print()

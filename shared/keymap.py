@@ -175,6 +175,7 @@ KEY_SCROLLLOCK = 70
 # Common keys for hotkey combos
 KEY_S = 31
 KEY_T = 20
+KEY_R = 19
 KEY_1 = 2
 KEY_2 = 3
 KEY_3 = 4

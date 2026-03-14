@@ -170,6 +170,14 @@ def main():
                 lambda: _send("sync_clipboard"),
             )
         )
+
+        # Refresh Layout
+        items.append(
+            MenuItem(
+                "Refresh Layout      Ctrl+Alt+R",
+                lambda: _send("refresh_layout"),
+            )
+        )
         items.append(Menu.SEPARATOR)
 
         # Client info submenu

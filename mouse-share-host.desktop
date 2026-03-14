@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=UniCent Host
+Comment=Share mouse & keyboard over network (Host)
+Exec=sudo /usr/bin/python3 -m host.main
+Path=/home/jmgoth/Desktop/web-apps/mouse-share
+Icon=/home/jmgoth/Desktop/web-apps/mouse-share/assets/icon-host-256.png
+Terminal=true
+Type=Application
+Categories=Utility;System;Network;
+Keywords=mouse;keyboard;share;kvm;unicent;
+StartupNotify=false

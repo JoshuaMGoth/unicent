@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FF6B6B;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#C0392B;stop-opacity:1"/>
+    </linearGradient>
+    <linearGradient id="macscreen" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#2c3e50;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#1a1a2e;stop-opacity:1"/>
+    </linearGradient>
+    <linearGradient id="macbody" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#e8e8e8;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#c8c8c8;stop-opacity:1"/>
+    </linearGradient>
+    <filter id="shadow" x="-5%" y="-5%" width="115%" height="115%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000" flood-opacity="0.3"/>
+    </filter>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <!-- Background rounded square -->
+  <rect x="16" y="16" width="480" height="480" rx="96" ry="96" fill="url(#bg)"/>
+  <!-- MacBook-style laptop -->
+  <g filter="url(#shadow)">
+    <!-- Screen lid -->
+    <rect x="110" y="80" width="292" height="200" rx="10" ry="10" fill="url(#macbody)"/>
+    <rect x="120" y="88" width="272" height="176" rx="4" ry="4" fill="url(#macscreen)"/>
+    <!-- Screen bezel notch (like MacBook) -->
+    <rect x="230" y="88" width="52" height="8" rx="0" ry="0" fill="url(#macbody)"/>
+    <circle cx="256" cy="92" r="3" fill="#555"/>
+    <!-- macOS-style window on screen -->
+    <rect x="138" y="110" width="236" height="140" rx="6" ry="6" fill="#1e1e2e"/>
+    <!-- Window title bar -->
+    <rect x="138" y="110" width="236" height="22" rx="6" ry="6" fill="#2d2d3d"/>
+    <rect x="138" y="126" width="236" height="6" fill="#2d2d3d"/>
+    <!-- Traffic lights -->
+    <circle cx="152" cy="121" r="5" fill="#ff5f57"/>
+    <circle cx="166" cy="121" r="5" fill="#febc2e"/>
+    <circle cx="180" cy="121" r="5" fill="#28c840"/>
+    <!-- Terminal content -->
+    <text x="148" y="150" font-family="monospace" font-size="11" fill="#50fa7b">$ UniCent</text>
+    <text x="148" y="166" font-family="monospace" font-size="10" fill="#8be9fd">CLIENT connected</text>
+    <text x="148" y="182" font-family="monospace" font-size="10" fill="#f8f8f2">Receiving input</text>
+    <!-- cursor icon on screen -->
+    <g transform="translate(310, 175)">
+      <path d="M0,0 L0,18 L5,14 L10,23 L13,21 L8,12 L15,12 Z" fill="white" stroke="#333" stroke-width="1"/>
+    </g>
+    <!-- Keyboard base -->
+    <path d="M80,280 L110,280 L110,280 L402,280 L432,280 L440,310 Q440,320 430,320 L82,320 Q72,320 72,310 Z" fill="url(#macbody)" stroke="#bbb" stroke-width="0.5"/>
+    <!-- Trackpad area -->
+    <rect x="216" y="290" width="80" height="24" rx="4" ry="4" fill="#d8d8d8" stroke="#bbb" stroke-width="0.5"/>
+    <!-- Keyboard keys on base -->
+    <g fill="#e0e0e0" stroke="#ccc" stroke-width="0.5">
+      <rect x="100" y="283" width="14" height="10" rx="1.5"/>
+      <rect x="117" y="283" width="14" height="10" rx="1.5"/>
+      <rect x="134" y="283" width="14" height="10" rx="1.5"/>
+      <rect x="151" y="283" width="14" height="10" rx="1.5"/>
+      <rect x="168" y="283" width="14" height="10" rx="1.5"/>
+      <rect x="185" y="283" width="14" height="10" rx="1.5"/>
+      <rect x="202" y="283" width="14" height="10" rx="1.5"/>
+      <rect x="312" y="283" width="14" height="10" rx="1.5"/>
+      <rect x="329" y="283" width="14" height="10" rx="1.5"/>
+      <rect x="346" y="283" width="14" height="10" rx="1.5"/>
+      <rect x="363" y="283" width="14" height="10" rx="1.5"/>
+      <rect x="380" y="283" width="14" height="10" rx="1.5"/>
+      <rect x="397" y="283" width="14" height="10" rx="1.5"/>
+    </g>
+  </g>
+  <!-- WiFi signal waves (incoming) -->
+  <g transform="translate(80, 170)" filter="url(#glow)">
+    <path d="M60,0 Q40,20 40,40" fill="none" stroke="#ffeb3b" stroke-width="4" stroke-linecap="round" opacity="0.5"/>
+    <path d="M70,-10 Q45,15 35,45" fill="none" stroke="#ffeb3b" stroke-width="4" stroke-linecap="round" opacity="0.7"/>
+    <path d="M80,-15 Q50,10 30,50" fill="none" stroke="#ffeb3b" stroke-width="4" stroke-linecap="round" opacity="0.9"/>
+  </g>
+  <!-- Arrow pointing right (incoming) -->
+  <g transform="translate(60, 200)">
+    <line x1="0" y1="0" x2="30" y2="0" stroke="white" stroke-width="4" stroke-linecap="round"/>
+    <polyline points="22,-8 30,0 22,8" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <!-- Apple logo hint (subtle) -->
+  <g transform="translate(242, 340)">
+    <path d="M14,0 C14,-4 18,-8 22,-8 C18,-8 16,-12 16,-16 C16,-12 12,-8 8,-8 C12,-8 14,-4 14,0 Z" fill="white" opacity="0.15" transform="scale(1.5)"/>
+  </g>
+  <!-- "CLIENT" label -->
+  <rect x="160" y="380" width="190" height="44" rx="22" ry="22" fill="white" opacity="0.2"/>
+  <text x="255" y="409" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="bold" fill="white" text-anchor="middle" letter-spacing="3">CLIENT</text>
+</svg>

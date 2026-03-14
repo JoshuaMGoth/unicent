@@ -7,9 +7,7 @@
     <string>com.unicent.host</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/python3</string>
-        <string>-m</string>
-        <string>host.main</string>
+        <string>/usr/local/bin/unicent-host</string>
         <string>--no-tls</string>
     </array>
     <key>WorkingDirectory</key>

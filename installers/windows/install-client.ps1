@@ -51,12 +51,12 @@ if (Test-Path "$InstallDir\.git") {
 Write-Host "  ✓ Source code ready at $InstallDir"
 
 Write-Host "  [3/5] Installing Python dependencies..."
-& $pythonCmd -m pip install pystray Pillow
+& $pythonCmd -m pip install pystray Pillow pywin32
 Write-Host "  ✓ Python packages installed"
 
 Write-Host "  [4/5] Setting up auto-start..."
 $regPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-$regValue = "`"$pythonCmd`" -m client.main --no-tls"
+$regValue = "cmd /c `"cd /d $InstallDir && `"$pythonCmd`" -m client.main --no-tls`""
 Set-ItemProperty -Path $regPath -Name "UniCentClient" -Value $regValue
 Write-Host "  ✓ Auto-start registered in Windows Registry"
 

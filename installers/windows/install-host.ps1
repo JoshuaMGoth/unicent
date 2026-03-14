@@ -59,13 +59,13 @@ Write-Host "  ✓ Source code ready at $InstallDir"
 
 # Step 3: Python deps
 Write-Host "  [3/5] Installing Python dependencies..."
-& $pythonCmd -m pip install pystray Pillow
+& $pythonCmd -m pip install pystray Pillow pywin32
 Write-Host "  ✓ Python packages installed"
 
 # Step 4: Auto-start (Registry)
 Write-Host "  [4/5] Setting up auto-start..."
 $regPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-$regValue = "`"$pythonCmd`" -m host.main --no-tls"
+$regValue = "cmd /c `"cd /d $InstallDir && `"$pythonCmd`" -m host.main --no-tls`""
 Set-ItemProperty -Path $regPath -Name "UniCentHost" -Value $regValue
 Write-Host "  ✓ Auto-start registered in Windows Registry"
 

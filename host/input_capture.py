@@ -790,7 +790,7 @@ class HotkeyDetector:
         self.META_KEYS = META_KEYS
         self.ALL_MODS = CTRL_KEYS | ALT_KEYS | SHIFT_KEYS | META_KEYS
 
-    def register(self, name: str, modifiers: set, key: int, callback: Callable):
+    def register(self, name: str, modifiers: list, key: int, callback: Callable):
         self._callbacks[name] = {
             'modifiers': modifiers,
             'key': key,

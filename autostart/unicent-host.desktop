@@ -2,7 +2,7 @@
 Type=Application
 Name=UniCent Host
 Comment=UniCent mouse/keyboard sharing — Host
-Exec=/usr/bin/python3 -m host.main --no-tls
+Exec=/usr/local/bin/unicent-host --no-tls
 Path=/opt/unicent
 Icon=/opt/unicent/assets/icon-u-128.png
 Terminal=false

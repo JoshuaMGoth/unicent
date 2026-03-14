@@ -1,11 +1,11 @@
 [Desktop Entry]
 Type=Application
 Name=UniCent Client
-Comment=UniCent mouse/keyboard sharing — Client
-Exec=/usr/bin/python3 -m client.main --no-tls
+Comment=UniCent mouse/keyboard sharing — Client (edit --host IP below)
+Exec=/usr/local/bin/unicent-client --host YOUR_HOST_IP --no-tls
 Path=/opt/unicent
 Icon=/opt/unicent/assets/icon-u-128.png
 Terminal=false
 Categories=Utility;Network;
 StartupNotify=false
-X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-enabled=false

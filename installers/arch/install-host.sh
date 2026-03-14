@@ -19,9 +19,15 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 echo "  [1/5] Installing system dependencies..."
-pacman -Sy --noconfirm --needed python python-pip git xdotool xclip \
-    python-pillow libappindicator-gtk3 2>/dev/null || true
+pacman -Sy --noconfirm --needed python python-pip git xclip xsel \
+    wl-clipboard python-pillow libappindicator-gtk3 2>/dev/null || true
 echo "  ✓ System packages installed"
+
+# Add user to input group for evdev access
+if [[ -n "${SUDO_USER:-}" ]]; then
+    usermod -aG input "$SUDO_USER" 2>/dev/null || true
+    echo "  ✓ Added $SUDO_USER to 'input' group (re-login required)"
+fi
 
 echo "  [2/5] Cloning / updating UniCent..."
 if [[ -d "$INSTALL_DIR/.git" ]]; then
@@ -34,8 +40,8 @@ echo "  ✓ Source code ready at $INSTALL_DIR"
 
 echo "  [3/5] Installing Python dependencies..."
 cd "$INSTALL_DIR"
-python3 -m pip install --break-system-packages pystray Pillow 2>/dev/null \
-    || python3 -m pip install pystray Pillow
+python3 -m pip install --break-system-packages pystray Pillow evdev 2>/dev/null \
+    || python3 -m pip install pystray Pillow evdev
 echo "  ✓ Python packages installed"
 
 echo "  [4/5] Setting up auto-start..."

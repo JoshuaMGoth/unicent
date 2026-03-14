@@ -7,9 +7,7 @@
     <string>com.unicent.client</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/python3</string>
-        <string>-m</string>
-        <string>client.main</string>
+        <string>/usr/local/bin/unicent-client</string>
         <string>--no-tls</string>
     </array>
     <key>WorkingDirectory</key>

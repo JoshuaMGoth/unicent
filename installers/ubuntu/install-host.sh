@@ -20,10 +20,16 @@ fi
 
 echo "  [1/5] Installing system dependencies..."
 apt-get update -qq
-apt-get install -y -qq python3 python3-pip python3-venv \
-    git xdotool xclip libgirepository1.0-dev \
+apt-get install -y -qq python3 python3-pip python3-venv python3-gi \
+    git xclip xsel wl-clipboard libgirepository1.0-dev \
     gir1.2-appindicator3-0.1 2>/dev/null || true
 echo "  ✓ System packages installed"
+
+# Add user to input group for evdev access
+if [[ -n "${SUDO_USER:-}" ]]; then
+    usermod -aG input "$SUDO_USER" 2>/dev/null || true
+    echo "  ✓ Added $SUDO_USER to 'input' group (re-login required)"
+fi
 
 echo "  [2/5] Cloning / updating UniCent..."
 if [[ -d "$INSTALL_DIR/.git" ]]; then
@@ -36,8 +42,8 @@ echo "  ✓ Source code ready at $INSTALL_DIR"
 
 echo "  [3/5] Installing Python dependencies..."
 cd "$INSTALL_DIR"
-python3 -m pip install --break-system-packages pystray Pillow 2>/dev/null \
-    || python3 -m pip install pystray Pillow
+python3 -m pip install --break-system-packages pystray Pillow evdev 2>/dev/null \
+    || python3 -m pip install pystray Pillow evdev
 echo "  ✓ Python packages installed"
 
 echo "  [4/5] Setting up auto-start..."

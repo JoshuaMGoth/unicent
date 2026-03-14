@@ -205,7 +205,8 @@ def get_clipboard_content() -> str:
         except Exception:
             return ''
     elif _SYSTEM == 'Linux':
-        for cmd in [['xclip', '-selection', 'clipboard', '-o'],
+        for cmd in [['wl-paste', '--no-newline'],
+                    ['xclip', '-selection', 'clipboard', '-o'],
                     ['xsel', '--clipboard', '--output']]:
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
@@ -246,7 +247,8 @@ def set_clipboard_content(content: str):
         except Exception:
             pass
     elif _SYSTEM == 'Linux':
-        for cmd in [['xclip', '-selection', 'clipboard'],
+        for cmd in [['wl-copy'],
+                    ['xclip', '-selection', 'clipboard'],
                     ['xsel', '--clipboard', '--input']]:
             try:
                 p = subprocess.Popen(cmd, stdin=subprocess.PIPE)

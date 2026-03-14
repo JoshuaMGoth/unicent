@@ -19,8 +19,8 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 echo "  [1/5] Installing system dependencies..."
-pacman -Sy --noconfirm --needed python python-pip git xdotool xclip \
-    python-pillow libappindicator-gtk3 2>/dev/null || true
+pacman -Sy --noconfirm --needed python python-pip git xdotool xclip xsel \
+    wl-clipboard ydotool python-pillow libappindicator-gtk3 2>/dev/null || true
 echo "  ✓ System packages installed"
 
 echo "  [2/5] Cloning / updating UniCent..."
@@ -44,6 +44,8 @@ AUTOSTART_DIR="$SUDO_USER_HOME/.config/autostart"
 mkdir -p "$AUTOSTART_DIR"
 cp "$INSTALL_DIR/autostart/unicent-client.desktop" "$AUTOSTART_DIR/"
 echo "  ✓ Auto-start configured for ${SUDO_USER:-root}"
+echo "  Note: Edit $AUTOSTART_DIR/unicent-client.desktop"
+echo "        Replace YOUR_HOST_IP with the host's IP address"
 
 echo "  [5/5] Creating launch script..."
 cat > /usr/local/bin/unicent-client << 'SCRIPT'

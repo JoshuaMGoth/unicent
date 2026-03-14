@@ -36,9 +36,12 @@ echo "  ✓ Source code ready at $INSTALL_DIR"
 
 echo "  [3/5] Installing Python dependencies..."
 cd "$INSTALL_DIR"
-python3 -m pip install --user pyobjc-framework-Quartz rumps pystray Pillow 2>/dev/null \
-    || pip3 install pyobjc-framework-Quartz rumps pystray Pillow
-echo "  ✓ Python packages installed"
+if [[ ! -d ".venv" ]]; then
+    python3 -m venv .venv
+fi
+.venv/bin/pip install --upgrade pip 2>/dev/null || true
+.venv/bin/pip install pyobjc-framework-Quartz rumps pystray Pillow
+echo "  ✓ Python packages installed (venv)"
 
 echo "  [4/5] Setting up auto-start (LaunchAgent)..."
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
@@ -51,7 +54,11 @@ echo "  [5/5] Creating launch script..."
 cat > /usr/local/bin/unicent-host << 'SCRIPT'
 #!/usr/bin/env bash
 cd /usr/local/share/unicent
-exec python3 -m host.main "$@"
+if [[ -f .venv/bin/python3 ]]; then
+    exec .venv/bin/python3 -m host.main "$@"
+else
+    exec python3 -m host.main "$@"
+fi
 SCRIPT
 chmod +x /usr/local/bin/unicent-host
 echo "  ✓ Launch with: unicent-host"

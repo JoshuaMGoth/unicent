@@ -217,6 +217,8 @@ class UniCentClient:
             if self.injector:
                 self.injector.move_mouse_absolute(x, y)
         else:
+            # Becoming inactive — send our clipboard to the host
+            self._send_clipboard_to_host()
             self._active = False
             log.info("Now inactive")
             print("\n  ● Inactive — host has control")
@@ -233,6 +235,16 @@ class UniCentClient:
                 log.info(f"Clipboard received ({len(content)} chars)")
             except Exception as e:
                 log.warning(f"Failed to set clipboard: {e}")
+
+    def _send_clipboard_to_host(self):
+        """Read local clipboard and send it to the host."""
+        try:
+            clip = get_clipboard_content()
+            if clip and self.connection:
+                self.connection.send_clipboard(clip)
+                log.debug(f"Clipboard sent to host ({len(clip)} chars)")
+        except Exception as e:
+            log.debug(f"Clipboard send failed: {e}")
 
     # ──── Discovery ────────────────────────────────────────
 

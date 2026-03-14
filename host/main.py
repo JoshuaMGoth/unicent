@@ -143,6 +143,7 @@ class UniCentHost:
         self._controlling_remote = False
         self._last_cursor_sync = 0.0
         self._host_hostname = socket.gethostname()
+        self._pending_clipboard: str = ''  # clipboard received from client
 
     # ──── Lifecycle ────────────────────────────────────────
 
@@ -287,6 +288,16 @@ class UniCentHost:
         if machine_id not in self.server.clients:
             return
 
+        # Auto-sync: send host clipboard to the client we're switching to
+        try:
+            from client.screen_manager import get_clipboard_content
+            clip = get_clipboard_content()
+            if clip:
+                self.server.send_clipboard(clip)
+                log.debug(f"Clipboard sent to {machine_id} ({len(clip)} chars)")
+        except Exception as e:
+            log.debug(f"Clipboard auto-sync failed: {e}")
+
         self._controlling_remote = True
         self.capture.grab()
 
@@ -312,6 +323,16 @@ class UniCentHost:
         self.server.set_active_client(None)
         self.layout._active_machine = 'host'
 
+        # Auto-sync: apply clipboard received from client
+        if self._pending_clipboard:
+            try:
+                from client.screen_manager import set_clipboard_content
+                set_clipboard_content(self._pending_clipboard)
+                log.debug(f"Host clipboard set from client ({len(self._pending_clipboard)} chars)")
+            except Exception as e:
+                log.debug(f"Clipboard apply failed: {e}")
+            self._pending_clipboard = ''
+
         # Warp local cursor to layout position
         lx, ly = self.layout.get_local_cursor('host')
         _warp_cursor(lx, ly)
@@ -326,17 +347,17 @@ class UniCentHost:
     def _register_hotkeys(self):
         """Register Ctrl+Alt+<key> hotkeys."""
         self.hotkey.register(
-            'switch_next', {CTRL_KEYS, ALT_KEYS}, KEY_S,
+            'switch_next', [CTRL_KEYS, ALT_KEYS], KEY_S,
             self._hotkey_switch_next)
         self.hotkey.register(
-            'clipboard', {CTRL_KEYS, ALT_KEYS}, KEY_C,
+            'clipboard', [CTRL_KEYS, ALT_KEYS], KEY_C,
             self._hotkey_clipboard_sync)
 
         # Ctrl+Alt+1..5 → switch to machine index
         for i, key in enumerate([KEY_1, KEY_2, KEY_3, KEY_4, KEY_5]):
             idx = i
             self.hotkey.register(
-                f'switch_{i}', {CTRL_KEYS, ALT_KEYS}, key,
+                f'switch_{i}', [CTRL_KEYS, ALT_KEYS], key,
                 lambda _idx=idx: self._hotkey_switch_to(_idx))
 
     def _hotkey_switch_next(self):
@@ -406,12 +427,15 @@ class UniCentHost:
 
     def _on_clipboard_received(self, client_id: str, content: str):
         if content:
-            try:
-                from client.screen_manager import set_clipboard_content
-                set_clipboard_content(content)
-                log.info(f"Clipboard received from {client_id} ({len(content)} chars)")
-            except Exception as e:
-                log.warning(f"Failed to set clipboard: {e}")
+            self._pending_clipboard = content
+            log.info(f"Clipboard received from {client_id} ({len(content)} chars)")
+            # If we're already on host, apply immediately
+            if not self._controlling_remote:
+                try:
+                    from client.screen_manager import set_clipboard_content
+                    set_clipboard_content(content)
+                except Exception as e:
+                    log.warning(f"Failed to set clipboard: {e}")
 
     # ──── Display helpers ──────────────────────────────────
 

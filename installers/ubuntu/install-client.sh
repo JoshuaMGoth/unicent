@@ -20,8 +20,8 @@ fi
 
 echo "  [1/5] Installing system dependencies..."
 apt-get update -qq
-apt-get install -y -qq python3 python3-pip python3-venv \
-    git xdotool xclip libgirepository1.0-dev \
+apt-get install -y -qq python3 python3-pip python3-venv python3-gi \
+    git xdotool xclip xsel wl-clipboard ydotool libgirepository1.0-dev \
     gir1.2-appindicator3-0.1 2>/dev/null || true
 echo "  ✓ System packages installed"
 
@@ -46,6 +46,8 @@ AUTOSTART_DIR="$SUDO_USER_HOME/.config/autostart"
 mkdir -p "$AUTOSTART_DIR"
 cp "$INSTALL_DIR/autostart/unicent-client.desktop" "$AUTOSTART_DIR/"
 echo "  ✓ Auto-start configured for ${SUDO_USER:-root}"
+echo "  Note: Edit $AUTOSTART_DIR/unicent-client.desktop"
+echo "        Replace YOUR_HOST_IP with the host's IP address"
 
 echo "  [5/5] Creating launch script..."
 cat > /usr/local/bin/unicent-client << 'SCRIPT'

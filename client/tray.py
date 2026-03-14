@@ -3,6 +3,8 @@ Client system tray / menu bar icon — cross-platform.
 
 Uses rumps on macOS (native menu bar), pystray on Linux/Windows.
 Icon: Purple rounded-rectangle with white 'U'.
+
+Includes About, Check for Updates, and Report a Bug.
 """
 
 import os
@@ -15,6 +17,8 @@ from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from client.main import UniCentClient
+
+from shared.version import __version__, __app_name__
 
 log = logging.getLogger(__name__)
 
@@ -76,7 +80,8 @@ def _load_u_icon(size: int = 64):
     draw = ImageDraw.Draw(img)
     margin = max(1, size // 16)
     radius = size // 4
-    draw.rounded_rectangle([margin, margin, size - margin - 1, size - margin - 1],
+    draw.rounded_rectangle([margin, margin, size - margin - 1,
+                            size - margin - 1],
                            radius=radius, fill=(75, 0, 130, 255))
     font_size = int(size * 0.65)
     font = ImageFont.load_default()
@@ -94,6 +99,32 @@ def _load_u_icon(size: int = 64):
     draw.text(((size - tw) / 2 - bbox[0], (size - th) / 2 - bbox[1]),
               "U", fill=(255, 255, 255, 255), font=font)
     return img
+
+
+# ─── Dialog launchers (shared by all backends) ───────────────
+
+def _show_about():
+    try:
+        from shared.dialogs import show_about_dialog
+        show_about_dialog()
+    except Exception as e:
+        log.warning(f"Could not show About dialog: {e}")
+
+
+def _show_updates():
+    try:
+        from shared.dialogs import show_update_dialog
+        show_update_dialog()
+    except Exception as e:
+        log.warning(f"Could not show Update dialog: {e}")
+
+
+def _show_bug_report():
+    try:
+        from shared.dialogs import show_bug_report_dialog
+        show_bug_report_dialog()
+    except Exception as e:
+        log.warning(f"Could not show Bug Report dialog: {e}")
 
 
 # ─── macOS: rumps-based menu bar app ───────────────────────────
@@ -118,19 +149,35 @@ if _USE_RUMPS:
         def _build_menu(self):
             self.menu.clear()
             if self._connected:
-                status = '● Receiving input' if self._active else '● Connected to host'
+                status = '● Receiving input' if self._active \
+                    else '● Connected to host'
             else:
                 status = '○ Disconnected'
             self.menu = [rumps.MenuItem(status, callback=None), None]
             host_addr = getattr(self._client, 'host_addr', None)
             if host_addr:
                 host_port = getattr(self._client, 'host_port', 27183)
-                self.menu.append(rumps.MenuItem(f'Host: {host_addr}:{host_port}', callback=None))
+                self.menu.append(rumps.MenuItem(
+                    f'Host: {host_addr}:{host_port}', callback=None))
                 self.menu.append(None)
             if not self._connected and host_addr:
-                self.menu.append(rumps.MenuItem('Reconnect', callback=self._on_reconnect))
+                self.menu.append(rumps.MenuItem(
+                    'Reconnect', callback=self._on_reconnect))
                 self.menu.append(None)
-            self.menu.append(rumps.MenuItem('Quit UniCent', callback=self._on_quit))
+
+            # Tools
+            self.menu.append(None)
+            self.menu.append(rumps.MenuItem(
+                'Check for Updates...', callback=self._on_updates))
+            self.menu.append(rumps.MenuItem(
+                'Report a Bug...', callback=self._on_bug_report))
+            self.menu.append(None)
+            self.menu.append(rumps.MenuItem(
+                f'About {__app_name__} v{__version__}',
+                callback=self._on_about))
+            self.menu.append(None)
+            self.menu.append(rumps.MenuItem(
+                'Quit UniCent', callback=self._on_quit))
 
         def update_status(self, connected: bool, active: bool = False):
             self._connected = connected
@@ -149,6 +196,15 @@ if _USE_RUMPS:
                 conn.stop()
                 time.sleep(0.5)
                 conn.start()
+
+        def _on_about(self, sender=None):
+            _show_about()
+
+        def _on_updates(self, sender=None):
+            _show_updates()
+
+        def _on_bug_report(self, sender=None):
+            _show_bug_report()
 
         def _on_quit(self, sender=None):
             self._client._running = False
@@ -176,7 +232,7 @@ class _PystrayClientTray:
         self._icon = pystray.Icon(
             name='unicent-client',
             icon=icon_image,
-            title='UniCent Client',
+            title=f'{__app_name__} Client v{__version__}',
             menu=self._build_menu(),
         )
         self._thread = threading.Thread(target=self._run_icon, daemon=True)
@@ -200,8 +256,9 @@ class _PystrayClientTray:
         self._active = active
         if self._icon:
             self._icon.menu = self._build_menu()
-            tooltip = 'UniCent — Receiving input' if active else (
-                'UniCent — Connected' if connected else 'UniCent — Disconnected')
+            tooltip = f'{__app_name__} — Receiving input' if active else (
+                f'{__app_name__} — Connected' if connected
+                else f'{__app_name__} — Disconnected')
             self._icon.title = tooltip
             try:
                 self._icon.update_menu()
@@ -226,6 +283,16 @@ class _PystrayClientTray:
         if not self._connected and host_addr:
             items.append(MenuItem('Reconnect', lambda: self._reconnect()))
             items.append(Menu.SEPARATOR)
+
+        # Tools
+        items.append(MenuItem('Check for Updates...',
+                              lambda: _show_updates()))
+        items.append(MenuItem('Report a Bug...',
+                              lambda: _show_bug_report()))
+        items.append(Menu.SEPARATOR)
+        items.append(MenuItem(f'About {__app_name__} v{__version__}',
+                              lambda: _show_about()))
+        items.append(Menu.SEPARATOR)
         items.append(MenuItem('Quit UniCent', lambda: self._quit()))
         return Menu(*items)
 
@@ -277,18 +344,22 @@ class ClientTray:
             def on_switch_active_wrapper(target, x, y):
                 original_on_switch_active(target, x, y)
                 if self.app:
-                    self.app.update_status(connected=True, active=bool(target))
+                    self.app.update_status(
+                        connected=True, active=bool(target))
 
             # Start client logic in background
-            bg_thread = threading.Thread(target=self.client._start_background, daemon=True)
+            bg_thread = threading.Thread(
+                target=self.client._start_background, daemon=True)
             bg_thread.start()
             time.sleep(0.5)
 
             # Patch callbacks after connection is set up
             if self.client.connection:
                 self.client.connection.on_connected = on_connected_wrapper
-                self.client.connection.on_disconnected = on_disconnected_wrapper
-                self.client.connection.on_switch_active = on_switch_active_wrapper
+                self.client.connection.on_disconnected = \
+                    on_disconnected_wrapper
+                self.client.connection.on_switch_active = \
+                    on_switch_active_wrapper
 
             # Run rumps on main thread (blocks)
             self.app.run()
@@ -313,7 +384,8 @@ class ClientTray:
             def on_switch_active_wrapper(target, x, y):
                 original_on_switch_active(target, x, y)
                 if self._pystray:
-                    self._pystray.update_status(connected=True, active=bool(target))
+                    self._pystray.update_status(
+                        connected=True, active=bool(target))
 
             self._pystray.start()
             self.client._start_background()
@@ -321,8 +393,10 @@ class ClientTray:
             # Patch callbacks after background start
             if self.client.connection:
                 self.client.connection.on_connected = on_connected_wrapper
-                self.client.connection.on_disconnected = on_disconnected_wrapper
-                self.client.connection.on_switch_active = on_switch_active_wrapper
+                self.client.connection.on_disconnected = \
+                    on_disconnected_wrapper
+                self.client.connection.on_switch_active = \
+                    on_switch_active_wrapper
         else:
             # No tray available, just run terminal mode
             self.client._run_terminal_mode()

@@ -301,6 +301,12 @@ class HostTray:
             self.host._hotkey_clipboard_sync()
         elif action == 'refresh_layout':
             self._refresh_layout()
+        elif action == 'wake_client':
+            client_id = msg.get('client_id', '')
+            if client_id:
+                self._wake_client(client_id)
+        elif action == 'wake_active':
+            self.host._hotkey_wake_client()
         elif action == 'show_about':
             self._show_about()
         elif action == 'show_settings':
@@ -429,20 +435,28 @@ class HostTray:
         items.append(MenuItem(
             'Refresh Layout      Ctrl+Alt+R',
             lambda: self._refresh_layout()))
+
+        # ── Wake shortcut ──
+        items.append(MenuItem(
+            'Wake Active Client      Ctrl+Alt+W',
+            lambda: self.host._hotkey_wake_client()))
         items.append(Menu.SEPARATOR)
 
-        # ── Client info ──
+        # ── Client info + wake ──
         if clients:
+            client_items = []
+            for c in clients:
+                cname = c.get('hostname', c['client_id'])
+                cid = c['client_id']
+                client_items.append(MenuItem(
+                    f'{cname} — {c.get("address", "")}',
+                    action=None, enabled=False))
+                client_items.append(MenuItem(
+                    f'  Wake & Activate {cname}',
+                    lambda _cid=cid: self._wake_client(_cid)))
             items.append(MenuItem(
                 f'Connected Clients ({len(clients)})',
-                Menu(*[
-                    MenuItem(
-                        f'{c.get("hostname", c["client_id"])}'
-                        f' — {c.get("address", "")}',
-                        action=None, enabled=False,
-                    ) for c in clients
-                ]),
-            ))
+                Menu(*client_items)))
             items.append(Menu.SEPARATOR)
 
         # ── Tools submenu ──
@@ -497,6 +511,13 @@ class HostTray:
         print(f"\n  Clients moved to {new_side.upper()} side")
         self.host._print_layout()
         self.update_menu()
+
+    def _wake_client(self, client_id: str):
+        """Send wake-screen signal to a client and switch to it."""
+        try:
+            self.host.wake_client(client_id)
+        except Exception as e:
+            log.warning(f"Could not wake client {client_id}: {e}")
 
     def _show_about(self):
         try:

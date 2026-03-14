@@ -40,6 +40,7 @@ class MsgType(IntEnum):
     DISCONNECT = 0x18
     PING = 0x19
     PONG = 0x1A
+    WAKE_SCREEN = 0x1B
 
 
 # Header format: type(uint8) + payload_length(uint32 BE)
@@ -180,6 +181,13 @@ def encode_ping() -> bytes:
 def encode_pong(ping_time: float) -> bytes:
     """Encode a pong message."""
     return encode_json_message(MsgType.PONG, {'t': ping_time, 'r': time.time()})
+
+
+def encode_wake_screen() -> bytes:
+    """Encode a wake-screen command to wake a sleeping/locked display."""
+    return encode_json_message(MsgType.WAKE_SCREEN, {
+        'timestamp': time.time(),
+    })
 
 
 # --- Decoder ---

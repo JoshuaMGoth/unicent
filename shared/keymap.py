@@ -181,7 +181,12 @@ KEY_2 = 3
 KEY_3 = 4
 KEY_4 = 5
 KEY_5 = 6
+KEY_6 = 7
+KEY_7 = 8
+KEY_8 = 9
+KEY_9 = 10
 KEY_C = 46
+KEY_W = 17
 
 # Modifier sets for easy checking
 CTRL_KEYS = {KEY_LEFTCTRL, KEY_RIGHTCTRL}

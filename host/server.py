@@ -20,7 +20,7 @@ from shared.protocol import (
     encode_mouse_move, encode_mouse_button, encode_mouse_scroll,
     encode_key_event, encode_handshake_ack, encode_heartbeat,
     encode_switch_active, encode_clipboard, encode_cursor_warp,
-    encode_json_message, decode_header, decode_payload,
+    encode_json_message, encode_wake_screen, decode_header, decode_payload,
 )
 
 log = logging.getLogger(__name__)
@@ -374,6 +374,14 @@ class HostServer:
         data = encode_clipboard(content)
         for client_id in list(self.clients.keys()):
             self._schedule_send(client_id, data)
+
+    def send_wake_screen(self, client_id: str):
+        """Send a wake-screen signal to a specific client."""
+        if client_id not in self.clients:
+            return
+        data = encode_wake_screen()
+        self._schedule_send(client_id, data)
+        log.info(f"Sent wake-screen to {client_id}")
 
     def _buffer_write(self, client_id: str, data: bytes):
         """Buffer a write for batch sending (reduces syscalls)."""

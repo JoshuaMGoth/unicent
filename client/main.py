@@ -147,6 +147,7 @@ class UniCentClient:
         self.connection.on_switch_active = self._on_switch_active
         self.connection.on_cursor_warp = self._on_cursor_warp
         self.connection.on_clipboard = self._on_clipboard
+        self.connection.on_wake_screen = self._on_wake_screen
 
         self.connection.start()
 
@@ -235,6 +236,31 @@ class UniCentClient:
                 log.info(f"Clipboard received ({len(content)} chars)")
             except Exception as e:
                 log.warning(f"Failed to set clipboard: {e}")
+
+    def _on_wake_screen(self):
+        """Wake the display from sleep/lock by simulating input."""
+        log.info("Wake-screen signal received")
+        print("\n  \u26a1 Wake signal received — waking display")
+        if self.injector:
+            try:
+                # Simulate a tiny mouse move to wake the display
+                self.injector.move_mouse_relative(1, 0)
+                import time
+                time.sleep(0.05)
+                self.injector.move_mouse_relative(-1, 0)
+            except Exception as e:
+                log.warning(f"Wake mouse-move failed: {e}")
+            try:
+                # Press and release Shift to further wake the screen
+                # Shift (keycode 42 Linux) is harmless and wakes displays
+                self.injector.key_event(42, 1)  # press
+                import time
+                time.sleep(0.05)
+                self.injector.key_event(42, 0)  # release
+            except Exception as e:
+                log.warning(f"Wake key-event failed: {e}")
+        # Mark ourselves as active so keyboard input flows
+        self._active = True
 
     def _send_clipboard_to_host(self):
         """Read local clipboard and send it to the host."""

@@ -75,6 +75,7 @@ class HostConnection:
         self.on_switch_active: Optional[Callable] = None    # (target, x, y)
         self.on_cursor_warp: Optional[Callable] = None      # (x, y)
         self.on_clipboard: Optional[Callable] = None        # (content)
+        self.on_wake_screen: Optional[Callable] = None      # ()
 
     def set_screens(self, screens: list):
         """Set screen info to send during handshake."""
@@ -280,6 +281,10 @@ class HostConnection:
 
             elif msg_type == MsgType.HEARTBEAT:
                 pass  # Heartbeat received, connection is alive
+
+            elif msg_type == MsgType.WAKE_SCREEN:
+                if self.on_wake_screen:
+                    self.on_wake_screen()
 
             elif msg_type == MsgType.PING:
                 # Respond with pong

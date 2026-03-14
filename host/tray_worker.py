@@ -178,19 +178,35 @@ def main():
                 lambda: _send("refresh_layout"),
             )
         )
+
+        # Wake shortcut
+        items.append(
+            MenuItem(
+                "Wake Active Client      Ctrl+Alt+W",
+                lambda: _send("wake_active"),
+            )
+        )
         items.append(Menu.SEPARATOR)
 
         # Client info submenu
         if clients:
-            client_items = [
-                MenuItem(
-                    f'{c.get("hostname", c["client_id"])} — '
-                    f'{c.get("address", "")}',
-                    action=None,
-                    enabled=False,
+            client_items = []
+            for c in clients:
+                cname = c.get('hostname', c.get('client_id', '?'))
+                cid = c.get('client_id', '')
+                client_items.append(
+                    MenuItem(
+                        f'{cname} \u2014 {c.get("address", "")}',
+                        action=None,
+                        enabled=False,
+                    )
                 )
-                for c in clients
-            ]
+                client_items.append(
+                    MenuItem(
+                        f'  Wake & Activate {cname}',
+                        lambda _cid=cid: _send('wake_client', client_id=_cid),
+                    )
+                )
             items.append(
                 MenuItem(
                     f"Connected Clients ({len(clients)})",

@@ -26,7 +26,8 @@ from host.server import HostServer
 from host.input_capture import InputCapture, find_input_devices, HotkeyDetector
 from host.screen_manager import ScreenLayout, get_host_screen_info
 from shared.keymap import (
-    CTRL_KEYS, ALT_KEYS, KEY_S, KEY_C, KEY_R, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5,
+    CTRL_KEYS, ALT_KEYS, KEY_S, KEY_C, KEY_R, KEY_W,
+    KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9,
 )
 
 log = logging.getLogger(__name__)
@@ -356,12 +357,18 @@ class UniCentHost:
             'refresh', [CTRL_KEYS, ALT_KEYS], KEY_R,
             self._hotkey_refresh_layout)
 
-        # Ctrl+Alt+1..5 → switch to machine index
-        for i, key in enumerate([KEY_1, KEY_2, KEY_3, KEY_4, KEY_5]):
+        # Ctrl+Alt+1..9 → switch to machine index
+        for i, key in enumerate([KEY_1, KEY_2, KEY_3, KEY_4, KEY_5,
+                                  KEY_6, KEY_7, KEY_8, KEY_9]):
             idx = i
             self.hotkey.register(
                 f'switch_{i}', [CTRL_KEYS, ALT_KEYS], key,
                 lambda _idx=idx: self._hotkey_switch_to(_idx))
+
+        # Ctrl+Alt+W → wake & activate current/last client
+        self.hotkey.register(
+            'wake_client', [CTRL_KEYS, ALT_KEYS], KEY_W,
+            self._hotkey_wake_client)
 
     def _hotkey_switch_next(self):
         target = self.layout.switch_to_next()
@@ -397,6 +404,44 @@ class UniCentHost:
         """Re-detect host screens, re-read cursor position, recalculate layout."""
         self.refresh_layout()
         print("\n  [Hotkey] Layout refreshed")
+
+    def _hotkey_wake_client(self):
+        """Wake & activate the current or first connected client."""
+        clients = self.server.get_client_list() if self.server else []
+        if not clients:
+            print("\n  [Hotkey] No clients to wake")
+            return
+        # Prefer the currently active client, else the first connected
+        active = self.layout.active_machine if self.layout else None
+        target_id = None
+        if active and active != 'host':
+            target_id = active
+        else:
+            target_id = clients[0]['client_id']
+        self.wake_client(target_id)
+
+    def wake_client(self, client_id: str):
+        """Send wake signal to a client, then switch control to it."""
+        if not self.server or client_id not in self.server.clients:
+            print(f"\n  [Wake] Client {client_id} not connected")
+            return
+        self.server.send_wake_screen(client_id)
+        # Also switch to that client so keyboard input goes to it
+        self._hotkey_switch_to_by_id(client_id)
+        print(f"\n  [Wake] Sent wake to {client_id}")
+        if self.tray:
+            self.tray.update_menu()
+
+    def _hotkey_switch_to_by_id(self, client_id: str):
+        """Switch to a machine by client_id rather than index."""
+        if not self.layout:
+            return
+        for i, m in enumerate(self.layout.machines):
+            if m.machine_id == client_id:
+                self._hotkey_switch_to(i)
+                return
+        # Fallback: just try switching by name
+        self._switch_to_machine(client_id)
 
     def refresh_layout(self):
         """Re-detect screens and resync cursor with the physical position.
@@ -532,9 +577,10 @@ class UniCentHost:
     def _print_status(self):
         print("  Hotkeys:")
         print("    Ctrl+Alt+S       — Switch to next machine")
-        print("    Ctrl+Alt+1..5    — Switch to machine #1..#5")
+        print("    Ctrl+Alt+1..9    — Switch to machine #1..#9")
         print("    Ctrl+Alt+C       — Sync clipboard")
         print("    Ctrl+Alt+R       — Refresh layout / resync edges")
+        print("    Ctrl+Alt+W       — Wake & activate client")
         print()
         print("  Waiting for clients...")
         print()

@@ -268,9 +268,10 @@ class UniCentClient:
             clip = get_clipboard_content()
             if clip and self.connection:
                 self.connection.send_clipboard(clip)
-                log.debug(f"Clipboard sent to host ({len(clip)} chars)")
+                log.info(f"Clipboard sent to host ({len(clip)} chars)")
+                print(f"  ✦ Clipboard sent to host ({len(clip)} chars)")
         except Exception as e:
-            log.debug(f"Clipboard send failed: {e}")
+            log.warning(f"Clipboard send failed: {e}")
 
     # ──── Discovery ────────────────────────────────────────
 

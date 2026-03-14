@@ -247,14 +247,23 @@ def set_clipboard_content(content: str):
         except Exception:
             pass
     elif _SYSTEM == 'Linux':
-        for cmd in [['wl-copy'],
-                    ['xclip', '-selection', 'clipboard'],
-                    ['xsel', '--clipboard', '--input']]:
+        import os as _os
+        # When running as root (sudo), wl-copy / xclip must run as the
+        # real desktop user so the compositor accepts the data source.
+        sudo_user = _os.environ.get('SUDO_USER', '') if _os.geteuid() == 0 else ''
+        base_cmds = [
+            ['wl-copy'],
+            ['xclip', '-selection', 'clipboard'],
+            ['xsel', '--clipboard', '--input'],
+        ]
+        for base in base_cmds:
+            cmd = ['runuser', '-u', sudo_user, '--'] + base if sudo_user else base
             try:
                 p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
                 p.communicate(content.encode('utf-8'), timeout=5)
-                return
-            except (FileNotFoundError, subprocess.TimeoutExpired):
+                if p.returncode == 0:
+                    return
+            except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
                 continue
     elif _SYSTEM == 'Windows':
         try:

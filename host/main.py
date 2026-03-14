@@ -324,14 +324,14 @@ class UniCentHost:
         self.server.set_active_client(None)
         self.layout._active_machine = 'host'
 
-        # Auto-sync: apply clipboard received from client
+        # Apply any pending clipboard that wasn't set yet
         if self._pending_clipboard:
             try:
                 from client.screen_manager import set_clipboard_content
                 set_clipboard_content(self._pending_clipboard)
-                log.debug(f"Host clipboard set from client ({len(self._pending_clipboard)} chars)")
+                log.info(f"Host clipboard set from pending ({len(self._pending_clipboard)} chars)")
             except Exception as e:
-                log.debug(f"Clipboard apply failed: {e}")
+                log.warning(f"Pending clipboard apply failed: {e}")
             self._pending_clipboard = ''
 
         # Warp local cursor to layout position
@@ -388,14 +388,20 @@ class UniCentHost:
             print(f"\n  [Hotkey] Switched to #{index} → {target}")
 
     def _hotkey_clipboard_sync(self):
-        """Sync host clipboard to all clients."""
+        """Bidirectional clipboard sync: host↔clients."""
         try:
-            from client.screen_manager import get_clipboard_content
-            content = get_clipboard_content()
-            if content:
-                self.server.send_clipboard(content)
-                print(f"\n  [Hotkey] Clipboard synced ({len(content)} chars)")
-            else:
+            from client.screen_manager import get_clipboard_content, set_clipboard_content
+            # 1. Send host clipboard → all clients
+            host_clip = get_clipboard_content()
+            if host_clip:
+                self.server.send_clipboard(host_clip)
+                print(f"\n  [Hotkey] Host clipboard → clients ({len(host_clip)} chars)")
+            # 2. Apply any pending client clipboard → host
+            if self._pending_clipboard:
+                set_clipboard_content(self._pending_clipboard)
+                print(f"  [Hotkey] Client clipboard → host ({len(self._pending_clipboard)} chars)")
+                self._pending_clipboard = ''
+            elif not host_clip:
                 print("\n  [Hotkey] Clipboard empty")
         except Exception as e:
             log.warning(f"Clipboard sync failed: {e}")
@@ -533,13 +539,17 @@ class UniCentHost:
         if content:
             self._pending_clipboard = content
             log.info(f"Clipboard received from {client_id} ({len(content)} chars)")
-            # If we're already on host, apply immediately
-            if not self._controlling_remote:
-                try:
-                    from client.screen_manager import set_clipboard_content
-                    set_clipboard_content(content)
-                except Exception as e:
-                    log.warning(f"Failed to set clipboard: {e}")
+            # Apply to host clipboard immediately (even if we're remote,
+            # this ensures the clipboard is set by the time the user
+            # switches back to host).
+            try:
+                from client.screen_manager import set_clipboard_content
+                set_clipboard_content(content)
+                log.info(f"Host clipboard updated from {client_id}")
+                self._pending_clipboard = ''  # already applied
+            except Exception as e:
+                log.warning(f"Failed to set host clipboard: {e}")
+                # Will be retried in _switch_to_host via _pending_clipboard
 
     # ──── Display helpers ──────────────────────────────────
 

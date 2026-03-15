@@ -50,7 +50,7 @@ cp "$INSTALL_DIR/autostart/com.unicent.host.plist" "$LAUNCH_AGENTS_DIR/"
 echo "  ✓ LaunchAgent installed"
 echo "  Note: To enable, run:  launchctl load ~/Library/LaunchAgents/com.unicent.host.plist"
 
-echo "  [5/5] Creating launch script..."
+echo "  [5/5] Creating launch script & app bundle..."
 cat > /usr/local/bin/unicent-host << 'SCRIPT'
 #!/usr/bin/env bash
 cd /usr/local/share/unicent
@@ -63,6 +63,52 @@ SCRIPT
 chmod +x /usr/local/bin/unicent-host
 echo "  ✓ Launch with: unicent-host"
 
+# Build .app bundle
+APP_DIR="/Applications/UniCent Host.app"
+mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
+cp "$INSTALL_DIR/assets/UniCent.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
+cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>UniCent Host</string>
+    <key>CFBundleDisplayName</key>
+    <string>UniCent Host</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.unicent.host</string>
+    <key>CFBundleVersion</key>
+    <string>1.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleExecutable</key>
+    <string>UniCent Host</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>10.13</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+</dict>
+</plist>
+PLIST
+cat > "$APP_DIR/Contents/MacOS/UniCent Host" << 'LAUNCH'
+#!/usr/bin/env bash
+cd /usr/local/share/unicent
+if [[ -f .venv/bin/python3 ]]; then
+    exec .venv/bin/python3 -m host.main "$@"
+else
+    exec python3 -m host.main "$@"
+fi
+LAUNCH
+chmod +x "$APP_DIR/Contents/MacOS/UniCent Host"
+echo "  ✓ App bundle created at $APP_DIR"
+
 echo
 echo "  ══════════════════════════════════════"
 echo "  ✓ UniCent Host installed!"
@@ -73,4 +119,5 @@ echo "  System Settings → Privacy & Security → Accessibility"
 echo "  Add Terminal.app (or iTerm2) to the list."
 echo
 echo "  Run:     unicent-host --no-tls -v"
+echo "  Or:      Open 'UniCent Host' from Applications"
 echo

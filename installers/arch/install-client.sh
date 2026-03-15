@@ -56,6 +56,12 @@ SCRIPT
 chmod +x /usr/local/bin/unicent-client
 echo "  ✓ Launch with: unicent-client"
 
+# Install icon to system location
+mkdir -p /usr/share/icons/hicolor/128x128/apps
+cp "$INSTALL_DIR/assets/icon-u-128.png" /usr/share/icons/hicolor/128x128/apps/unicent.png
+gtk-update-icon-cache /usr/share/icons/hicolor/ 2>/dev/null || true
+echo "  ✓ System icon installed"
+
 echo
 echo "  ══════════════════════════════════════"
 echo "  ✓ UniCent Client installed!"

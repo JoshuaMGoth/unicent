@@ -457,6 +457,15 @@ class HostServer:
         self.clients.clear()
         log.info("Host server stopped")
 
+    def disconnect_client(self, client_id: str):
+        """Disconnect a specific client by ID."""
+        client = self.clients.get(client_id)
+        if not client:
+            log.warning(f"Cannot disconnect unknown client: {client_id}")
+            return
+        log.info(f"Disconnecting client: {client_id}")
+        client.close()
+
     def get_client_list(self) -> List[dict]:
         """Get list of connected clients."""
         return [

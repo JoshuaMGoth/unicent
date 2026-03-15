@@ -305,6 +305,10 @@ class HostTray:
             client_id = msg.get('client_id', '')
             if client_id:
                 self._wake_client(client_id)
+        elif action == 'disconnect_client':
+            client_id = msg.get('client_id', '')
+            if client_id:
+                self._disconnect_client(client_id)
         elif action == 'wake_active':
             self.host._hotkey_wake_client()
         elif action == 'show_about':
@@ -454,6 +458,9 @@ class HostTray:
                 client_items.append(MenuItem(
                     f'  Wake & Activate {cname}',
                     lambda _cid=cid: self._wake_client(_cid)))
+                client_items.append(MenuItem(
+                    f'  Disconnect {cname}',
+                    lambda _cid=cid: self._disconnect_client(_cid)))
             items.append(MenuItem(
                 f'Connected Clients ({len(clients)})',
                 Menu(*client_items)))
@@ -518,6 +525,14 @@ class HostTray:
             self.host.wake_client(client_id)
         except Exception as e:
             log.warning(f"Could not wake client {client_id}: {e}")
+
+    def _disconnect_client(self, client_id: str):
+        """Disconnect a specific client."""
+        server = getattr(self.host, 'server', None)
+        if server:
+            server.disconnect_client(client_id)
+            print(f"\n  Disconnected client: {client_id}")
+            self.update_menu()
 
     def _show_about(self):
         try:

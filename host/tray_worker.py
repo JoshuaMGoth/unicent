@@ -207,6 +207,12 @@ def main():
                         lambda _cid=cid: _send('wake_client', client_id=_cid),
                     )
                 )
+                client_items.append(
+                    MenuItem(
+                        f'  Disconnect {cname}',
+                        lambda _cid=cid: _send('disconnect_client', client_id=_cid),
+                    )
+                )
             items.append(
                 MenuItem(
                     f"Connected Clients ({len(clients)})",

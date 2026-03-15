@@ -2,7 +2,7 @@
 UniCent version information.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __app_name__ = "UniCent"
 __author__ = "JoshuaGoth Software"
 __website__ = "https://joshuagoth.com"

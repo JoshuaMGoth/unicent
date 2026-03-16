@@ -145,6 +145,8 @@ class UniCentHost:
         self._last_cursor_sync = 0.0
         self._host_hostname = socket.gethostname()
         self._pending_clipboard: str = ''  # clipboard received from client
+        self._last_switch_time: float = 0.0
+        self._current_remote: str = ''
 
     # ──── Lifecycle ────────────────────────────────────────
 
@@ -258,9 +260,17 @@ class UniCentHost:
             # Remote mode → forward to active client via layout
             new_machine = self.layout.move_cursor(dx, dy)
             if new_machine == 'host':
-                self._switch_to_host()
+                # Prevent immediate bounce-back from jitter
+                if time.time() - self._last_switch_time < 0.15:
+                    self.layout._active_machine = self._current_remote
+                    for m in self.layout.machines:
+                        if m.machine_id == self._current_remote:
+                            self.layout._cursor_x = max(m.left, min(self.layout._cursor_x, m.right - 1))
+                            break
+                    self.server.forward_mouse_move(dx, dy)
+                else:
+                    self._switch_to_host()
             else:
-                lx, ly = self.layout.get_local_cursor()
                 self.server.forward_mouse_move(dx, dy)
 
     def _on_mouse_button(self, button: int, state: int):
@@ -300,10 +310,21 @@ class UniCentHost:
             log.debug(f"Clipboard auto-sync failed: {e}")
 
         self._controlling_remote = True
+        self._current_remote = machine_id
+        self._last_switch_time = time.time()
+        self.server.set_active_client(machine_id)
         self.capture.grab()
 
+        # Push cursor slightly inward from boundary to absorb jitter
+        for m in self.layout.machines:
+            if m.machine_id == machine_id:
+                if self.layout._cursor_x <= m.left + 1:
+                    self.layout._cursor_x = m.left + 4
+                elif self.layout._cursor_x >= m.right - 2:
+                    self.layout._cursor_x = m.right - 5
+                break
+
         lx, ly = self.layout.get_local_cursor(machine_id)
-        self.server.set_active_client(machine_id)
         self.server.send_switch_active(machine_id, lx, ly)
         self.server.send_cursor_warp(machine_id, lx, ly)
 

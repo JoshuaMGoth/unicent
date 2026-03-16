@@ -23,6 +23,7 @@ from typing import Optional
 from client.connection import HostConnection
 from client.input_inject import InputInjector, check_accessibility_permissions
 from client.screen_manager import get_client_screens, get_clipboard_content, set_clipboard_content
+from client.config import get_host_ip, set_host_ip
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +44,13 @@ class UniCentClient:
                  use_tls: bool = True, use_tray: bool = True,
                  cert_file: str = '', ca_file: str = '',
                  verbose: bool = False):
+        # If no host provided, try to use stored config
+        if not host_addr:
+            stored_ip = get_host_ip()
+            if stored_ip:
+                host_addr = stored_ip
+                log.info(f"Using stored host IP from config: {stored_ip}")
+        
         self.host_addr = host_addr
         self.host_port = host_port
         self.use_tls = use_tls
@@ -180,6 +188,9 @@ class UniCentClient:
 
     def _on_connected(self):
         log.info("Connected to host")
+        # Save the host IP for future auto-reconnection
+        if self.host_addr:
+            set_host_ip(self.host_addr)
         print(f"\n  ● Connected to {self.host_addr}:{self.host_port}")
 
     def _on_disconnected(self):

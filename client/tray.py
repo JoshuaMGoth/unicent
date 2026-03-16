@@ -153,31 +153,36 @@ if _USE_RUMPS:
                     else '● Connected to host'
             else:
                 status = '○ Disconnected'
-            self.menu = [rumps.MenuItem(status, callback=None), None]
+
+            items = [rumps.MenuItem(status, callback=None), None]
+
             host_addr = getattr(self._client, 'host_addr', None)
             if host_addr:
                 host_port = getattr(self._client, 'host_port', 27183)
-                self.menu.append(rumps.MenuItem(
+                items.append(rumps.MenuItem(
                     f'Host: {host_addr}:{host_port}', callback=None))
-                self.menu.append(None)
+                items.append(None)
             if not self._connected and host_addr:
-                self.menu.append(rumps.MenuItem(
+                items.append(rumps.MenuItem(
                     'Reconnect', callback=self._on_reconnect))
-                self.menu.append(None)
+                items.append(None)
 
             # Tools
-            self.menu.append(None)
-            self.menu.append(rumps.MenuItem(
+            items.append(None)
+            items.append(rumps.MenuItem(
                 'Check for Updates...', callback=self._on_updates))
-            self.menu.append(rumps.MenuItem(
+            items.append(rumps.MenuItem(
                 'Report a Bug...', callback=self._on_bug_report))
-            self.menu.append(None)
-            self.menu.append(rumps.MenuItem(
+            items.append(None)
+            items.append(rumps.MenuItem(
                 f'About {__app_name__} v{__version__}',
                 callback=self._on_about))
-            self.menu.append(None)
-            self.menu.append(rumps.MenuItem(
+            items.append(None)
+            items.append(rumps.MenuItem(
                 'Quit UniCent', callback=self._on_quit))
+
+            # Assign all items at once (rumps.Menu doesn't support append)
+            self.menu = items
 
         def update_status(self, connected: bool, active: bool = False):
             self._connected = connected

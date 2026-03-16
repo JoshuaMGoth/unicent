@@ -63,6 +63,7 @@ class HostConnection:
         # Client state
         self._screens: list = []
         self._clipboard: str = ''
+        self._disconnected_by_user: bool = False  # Renamed from _disconnected_by_host
 
         # Callbacks
         self.on_connected: Optional[Callable] = None
@@ -149,6 +150,10 @@ class HostConnection:
                         pass
 
             if self._running:
+                if self._disconnected_by_user:
+                    log.info("Disconnected by user request — not reconnecting")
+                    self._running = False
+                    break
                 log.info(f"Reconnecting in {RECONNECT_DELAY}s...")
                 await asyncio.sleep(RECONNECT_DELAY)
 
@@ -290,6 +295,17 @@ class HostConnection:
                 # Respond with pong
                 self._send_nowait(encode_pong(data.get('t', 0)))
 
+            elif msg_type == MsgType.DISCONNECT:
+                reason = data.get('reason', 'unknown')
+                log.info(f"Host sent disconnect: {reason}")
+                # Only set the disconnected flag if it was a specific reason
+                # Otherwise, allow reconnection attempts
+                if reason in ['duplicate_connection', 'banned']:
+                    self._disconnected_by_user = True
+                raise ConnectionError(f"Disconnected: {reason}")
+
+        except ConnectionError:
+            raise
         except Exception as e:
             log.error(f"Message dispatch error ({msg_type}): {e}")
 

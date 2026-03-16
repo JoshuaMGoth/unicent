@@ -221,6 +221,25 @@ def main():
             )
             items.append(Menu.SEPARATOR)
 
+        # Blocked clients (allow reconnection)
+        banned = s.get("banned", [])
+        if banned:
+            banned_items = []
+            for hostname in banned:
+                banned_items.append(
+                    MenuItem(
+                        f'  Allow {hostname}',
+                        lambda _h=hostname: _send('allow_client', hostname=_h),
+                    )
+                )
+            items.append(
+                MenuItem(
+                    f"Blocked Clients ({len(banned)})",
+                    Menu(*banned_items),
+                )
+            )
+            items.append(Menu.SEPARATOR)
+
         # Tools submenu
         tools = [
             MenuItem("Settings...", lambda: _send("show_settings")),

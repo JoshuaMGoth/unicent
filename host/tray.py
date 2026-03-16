@@ -266,6 +266,7 @@ class HostTray:
             'clients': safe_clients,
             'side': getattr(self.host, 'client_side', 'right'),
             'update_info': self._update_info,
+            'banned': [],  # No longer tracking banned clients
         }
 
     def _read_worker_actions(self):
@@ -309,6 +310,10 @@ class HostTray:
             client_id = msg.get('client_id', '')
             if client_id:
                 self._disconnect_client(client_id)
+        elif action == 'allow_client':
+            hostname = msg.get('hostname', '')
+            if hostname:
+                self._allow_client(hostname)
         elif action == 'wake_active':
             self.host._hotkey_wake_client()
         elif action == 'show_about':
@@ -466,6 +471,10 @@ class HostTray:
                 Menu(*client_items)))
             items.append(Menu.SEPARATOR)
 
+        # ── Banned clients (allow reconnection) ──
+        server = getattr(self.host, 'server', None)
+        # Banned clients list removed - clients can always reconnect after disconnect
+        
         # ── Tools submenu ──
         tools_items = [
             MenuItem('Settings...', lambda: self._show_settings()),
@@ -532,7 +541,11 @@ class HostTray:
         if server:
             server.disconnect_client(client_id)
             print(f"\n  Disconnected client: {client_id}")
-            self.update_menu()
+            # Menu will be updated when on_client_disconnected fires
+
+    def _allow_client(self, hostname: str):
+        """No longer used - clients can always reconnect after disconnect."""
+        log.debug(f"Allow client called (not needed): {hostname}")
 
     def _show_about(self):
         try:

@@ -20,7 +20,8 @@ from shared.protocol import (
     encode_mouse_move, encode_mouse_button, encode_mouse_scroll,
     encode_key_event, encode_handshake_ack, encode_heartbeat,
     encode_switch_active, encode_clipboard, encode_cursor_warp,
-    encode_json_message, encode_wake_screen, decode_header, decode_payload,
+    encode_json_message, encode_wake_screen, encode_disconnect,
+    decode_header, decode_payload,
 )
 
 log = logging.getLogger(__name__)
@@ -115,6 +116,9 @@ class HostServer:
         self._layout_info: list = []
         self._clipboard: str = ''
         self._active_client: Optional[str] = None
+
+        # Track which hostnames are currently connected to prevent duplicates
+        self._connected_hostnames: Dict[str, str] = {}  # hostname -> client_id
 
         # Buffered writes for high-frequency events
         self._write_buffer: Dict[str, list] = {}
@@ -233,10 +237,20 @@ class HostServer:
                 return
 
             # Create client connection
-            client_id = handshake_msg.get('hostname', client_addr)
-            # Make unique if duplicate
-            if client_id in self.clients:
-                client_id = f"{client_id}_{peername[1]}"
+            hostname = handshake_msg.get('hostname', client_addr)
+            client_id = hostname
+
+            # Reject duplicate connections from same hostname
+            if hostname in self._connected_hostnames:
+                existing_client_id = self._connected_hostnames[hostname]
+                log.info(f"Rejecting duplicate connection from {hostname} (already connected as {existing_client_id})")
+                try:
+                    writer.write(encode_disconnect('duplicate_connection'))
+                    await writer.drain()
+                except Exception:
+                    pass
+                writer.close()
+                return
 
             client = ClientConnection(reader, writer, client_id)
             client.hostname = handshake_msg.get('hostname', '')
@@ -255,6 +269,7 @@ class HostServer:
             # Register client
             self.clients[client_id] = client
             self._write_buffer[client_id] = []
+            self._connected_hostnames[hostname] = client_id
             log.info(f"Client registered: {client_id} ({client.address})")
 
             # Notify callback
@@ -277,6 +292,9 @@ class HostServer:
             if client and client.client_id in self.clients:
                 del self.clients[client.client_id]
                 self._write_buffer.pop(client.client_id, None)
+                # Remove from connected hostnames
+                if client.hostname in self._connected_hostnames:
+                    del self._connected_hostnames[client.hostname]
                 client.close()
                 log.info(f"Client removed: {client.client_id}")
                 if self.on_client_disconnected:
@@ -464,7 +482,37 @@ class HostServer:
             log.warning(f"Cannot disconnect unknown client: {client_id}")
             return
         log.info(f"Disconnecting client: {client_id}")
-        client.close()
+        # Schedule the async disconnect on the event loop thread
+        # (writer.close is not thread-safe from the tray thread)
+        if self._loop and self._loop.is_running():
+            self._loop.call_soon_threadsafe(
+                self._loop.create_task,
+                self._async_disconnect_client(client_id)
+            )
+        else:
+            client.close()
+
+    async def _async_disconnect_client(self, client_id: str):
+        """Disconnect a client by closing the socket (runs on event loop)."""
+        client = self.clients.get(client_id)
+        if not client:
+            return
+        # Close the connection
+        try:
+            client.writer.write(encode_disconnect('disconnected_by_user'))
+            await client.writer.drain()
+        except Exception:
+            pass
+        try:
+            client.writer.close()
+            await client.writer.wait_closed()
+        except Exception:
+            pass
+        log.info(f"Client disconnected by user: {client_id}")
+
+    def allow_client(self, hostname: str):
+        """No longer needed - clients can always reconnect after normal disconnect."""
+        log.info(f"Client reconnection allowed (was always permitted): {hostname}")
 
     def get_client_list(self) -> List[dict]:
         """Get list of connected clients."""

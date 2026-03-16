@@ -54,14 +54,33 @@ echo "  [5/5] Creating launch script & app bundle..."
 cat > /usr/local/bin/unicent-client << 'SCRIPT'
 #!/usr/bin/env bash
 cd /usr/local/share/unicent
+
+# Get Python interpreter
+PYTHON=""
 if [[ -f .venv/bin/python3 ]]; then
-    exec .venv/bin/python3 -m client.main "$@"
+    PYTHON=".venv/bin/python3"
 else
-    exec python3 -m client.main "$@"
+    PYTHON="python3"
 fi
+
+# Read host IP from config if not provided as argument
+HOST_ARG=""
+if [[ ! " $* " =~ " --host " ]]; then
+    # Try to read stored host IP
+    CONFIG_FILE="$HOME/.config/unicent/client.json"
+    if [[ -f "$CONFIG_FILE" ]]; then
+        HOST_IP=$($PYTHON -c "import json; config=json.load(open('$CONFIG_FILE')); print(config.get('host_ip', ''))" 2>/dev/null || echo "")
+        if [[ -n "$HOST_IP" ]]; then
+            HOST_ARG="--host $HOST_IP"
+        fi
+    fi
+fi
+
+# Execute client with optional host argument from config
+exec $PYTHON -m client.main $HOST_ARG "$@"
 SCRIPT
 chmod +x /usr/local/bin/unicent-client
-echo "  ✓ Launch with: unicent-client"
+echo "  ✓ Launch script created at /usr/local/bin/unicent-client"
 
 # Build .app bundle
 APP_DIR="/Applications/UniCent Client.app"
@@ -100,11 +119,30 @@ PLIST
 cat > "$APP_DIR/Contents/MacOS/UniCent Client" << 'LAUNCH'
 #!/usr/bin/env bash
 cd /usr/local/share/unicent
+
+# Get Python interpreter
+PYTHON=""
 if [[ -f .venv/bin/python3 ]]; then
-    exec .venv/bin/python3 -m client.main "$@"
+    PYTHON=".venv/bin/python3"
 else
-    exec python3 -m client.main "$@"
+    PYTHON="python3"
 fi
+
+# Read host IP from config if not provided as argument
+HOST_ARG=""
+if [[ ! " $* " =~ " --host " ]]; then
+    # Try to read stored host IP
+    CONFIG_FILE="$HOME/.config/unicent/client.json"
+    if [[ -f "$CONFIG_FILE" ]]; then
+        HOST_IP=$($PYTHON -c "import json; config=json.load(open('$CONFIG_FILE')); print(config.get('host_ip', ''))" 2>/dev/null || echo "")
+        if [[ -n "$HOST_IP" ]]; then
+            HOST_ARG="--host $HOST_IP"
+        fi
+    fi
+fi
+
+# Execute client with optional host argument from config
+exec $PYTHON -m client.main $HOST_ARG "$@"
 LAUNCH
 chmod +x "$APP_DIR/Contents/MacOS/UniCent Client"
 echo "  ✓ App bundle created at $APP_DIR"

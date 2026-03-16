@@ -183,6 +183,11 @@ def encode_pong(ping_time: float) -> bytes:
     return encode_json_message(MsgType.PONG, {'t': ping_time, 'r': time.time()})
 
 
+def encode_disconnect(reason: str = 'disconnected') -> bytes:
+    """Encode a disconnect command sent by the host to tell a client to stop."""
+    return encode_json_message(MsgType.DISCONNECT, {'reason': reason})
+
+
 def encode_wake_screen() -> bytes:
     """Encode a wake-screen command to wake a sleeping/locked display."""
     return encode_json_message(MsgType.WAKE_SCREEN, {

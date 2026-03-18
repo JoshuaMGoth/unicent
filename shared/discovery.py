@@ -183,3 +183,77 @@ class DiscoveryListener:
             v for v in self.get_peers().values()
             if v.get('role') == 'client'
         ]
+
+
+# ────────────────────────────────────────────────────────────
+# Active host scanning (TCP probe on Tailscale + LAN peers)
+# ────────────────────────────────────────────────────────────
+
+DEFAULT_PORT = 27183
+
+
+def _get_tailscale_peers() -> list:
+    """Get IP addresses of online Tailscale peers."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ['tailscale', 'status', '--json'],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode != 0:
+            return []
+        import json as _json
+        status = _json.loads(result.stdout)
+        peers = []
+        for peer in (status.get('Peer') or {}).values():
+            if not peer.get('Online', False):
+                continue
+            addrs = peer.get('TailscaleIPs', [])
+            for addr in addrs:
+                if ':' not in addr:  # IPv4 only
+                    peers.append(addr)
+        return peers
+    except Exception as e:
+        log.debug(f"Tailscale peer scan unavailable: {e}")
+        return []
+
+
+def _probe_port(ip: str, port: int, timeout: float = 1.0) -> bool:
+    """Check if a TCP port is open on the given IP."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(timeout)
+            s.connect((ip, port))
+            return True
+    except (OSError, socket.timeout):
+        return False
+
+
+def scan_for_host(port: int = DEFAULT_PORT, timeout: float = 1.5) -> Optional[str]:
+    """Scan Tailscale peers and return the first IP with UniCent port open.
+
+    Returns the host IP address, or None if not found.
+    """
+    peers = _get_tailscale_peers()
+    if not peers:
+        log.debug("No Tailscale peers found, skipping scan")
+        return None
+
+    log.info(f"Scanning {len(peers)} Tailscale peer(s) for UniCent host on port {port}...")
+
+    # Scan in parallel for speed
+    import concurrent.futures
+    found_ip = None
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(peers), 10)) as pool:
+        future_to_ip = {pool.submit(_probe_port, ip, port, timeout): ip for ip in peers}
+        for future in concurrent.futures.as_completed(future_to_ip):
+            ip = future_to_ip[future]
+            try:
+                if future.result():
+                    log.info(f"Found UniCent host at {ip}:{port}")
+                    found_ip = ip
+                    break
+            except Exception:
+                pass
+
+    return found_ip

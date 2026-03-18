@@ -160,9 +160,22 @@ class HostConnection:
     async def _connect_and_run(self):
         """Establish connection and run message loop."""
         if not self.host_addr:
-            log.error("No host address configured")
-            await asyncio.sleep(RECONNECT_DELAY)
-            return
+            # Try to discover a host on the network
+            try:
+                from shared.discovery import scan_for_host
+                found = await asyncio.get_event_loop().run_in_executor(
+                    None, scan_for_host, self.host_port)
+                if found:
+                    self.host_addr = found
+                    log.info(f"Auto-discovered host at {found}")
+                else:
+                    log.info("No host found on network, will retry...")
+                    await asyncio.sleep(RECONNECT_DELAY)
+                    return
+            except Exception as e:
+                log.debug(f"Host scan failed: {e}")
+                await asyncio.sleep(RECONNECT_DELAY)
+                return
 
         log.info(f"Connecting to {self.host_addr}:{self.host_port}...")
 

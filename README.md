@@ -177,6 +177,41 @@ The 'U' icon appears in your system tray (or macOS menu bar). Right-click for:
 - View connected clients
 - Quit
 
+## macOS: Required Permissions
+
+macOS requires **Accessibility** permission for UniCent to move the cursor and inject input events. Without this, the connection will appear to work but the cursor won't actually move.
+
+### After Installing (One-Time Setup)
+
+The macOS installer will automatically open System Settings and reveal the correct binary. If you need to do it manually:
+
+1. Find the Python binary UniCent uses:
+   ```bash
+   /usr/local/share/unicent/.venv/bin/python3 -c "import sys; print(sys.executable)"
+   ```
+   This will print a path like:
+   `/Applications/Xcode.app/Contents/Developer/.../Python3.framework/.../Python.app/Contents/MacOS/Python`
+
+2. Open **System Settings → Privacy & Security → Accessibility**
+
+3. Click the **+** button and add the `Python.app` bundle that contains the binary from step 1. You can reveal it in Finder with:
+   ```bash
+   # Find and open the Python.app bundle in Finder
+   open -R "$(python3 -c "
+   import sys, os
+   p = sys.executable
+   while p != '/':
+       if p.endswith('.app'): print(p); break
+       p = os.path.dirname(p)
+   ")"
+   ```
+
+4. Make sure the toggle next to it is **ON**
+
+5. **Restart the UniCent client/host** — macOS only applies the permission to newly launched processes.
+
+> **Note:** If you update Python or Xcode, the binary path may change and you'll need to re-add the new `Python.app` to Accessibility.
+
 ## Auto-Start on Boot
 
 The installers configure auto-start automatically. To set up manually:

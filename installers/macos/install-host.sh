@@ -109,14 +109,53 @@ LAUNCH
 chmod +x "$APP_DIR/Contents/MacOS/UniCent Host"
 echo "  ✓ App bundle created at $APP_DIR"
 
+# ── Grant Accessibility permission (required for input capture) ──
+echo
+echo "  [!] macOS requires Accessibility permission for input capture."
+echo
+
+# Find the real Python binary that will run UniCent
+PYTHON_BIN=""
+if [[ -f "$INSTALL_DIR/.venv/bin/python3" ]]; then
+    PYTHON_BIN=$("$INSTALL_DIR/.venv/bin/python3" -c "import sys; print(sys.executable)" 2>/dev/null || echo "")
+fi
+if [[ -z "$PYTHON_BIN" ]]; then
+    PYTHON_BIN=$(python3 -c "import sys; print(sys.executable)" 2>/dev/null || echo "")
+fi
+
+# Find the .app bundle containing the Python binary (macOS framework Python)
+PYTHON_APP=""
+if [[ -n "$PYTHON_BIN" ]]; then
+    _p="$PYTHON_BIN"
+    while [[ "$_p" != "/" ]]; do
+        if [[ "$_p" == *.app ]]; then
+            PYTHON_APP="$_p"
+            break
+        fi
+        _p=$(dirname "$_p")
+    done
+fi
+
+if [[ -n "$PYTHON_APP" ]]; then
+    echo "  The Python binary that needs permission is:"
+    echo "    $PYTHON_APP"
+    echo
+    echo "  Opening System Settings and Finder now..."
+    open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility" 2>/dev/null || true
+    open -R "$PYTHON_APP" 2>/dev/null || true
+    echo
+    echo "  ➜  Drag 'Python.app' from the Finder window into the"
+    echo "     Accessibility list in System Settings, then toggle it ON."
+else
+    echo "  System Settings → Privacy & Security → Accessibility"
+    echo "  Add the Python binary used by UniCent to the list."
+    echo "  (Run: python3 -c 'import sys; print(sys.executable)' to find it)"
+fi
+
 echo
 echo "  ══════════════════════════════════════"
 echo "  ✓ UniCent Host installed!"
 echo "  ══════════════════════════════════════"
-echo
-echo "  IMPORTANT: Grant Accessibility permissions!"
-echo "  System Settings → Privacy & Security → Accessibility"
-echo "  Add Terminal.app (or iTerm2) to the list."
 echo
 echo "  Run:     unicent-host --no-tls -v"
 echo "  Or:      Open 'UniCent Host' from Applications"

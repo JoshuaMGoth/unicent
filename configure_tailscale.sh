@@ -36,7 +36,7 @@ CONFIG_FILE="$CONFIG_DIR/client.json"
 mkdir -p "$CONFIG_DIR"
 
 # Create/update config file
-python3 << 'PYTHON'
+python3 - "$HOST_IP" << 'PYTHON'
 import sys
 import json
 import os
@@ -64,7 +64,7 @@ with open(config_file, 'w') as f:
 print(f"✓ Configuration saved to {config_file}")
 print(f"  Host IP: {config['host_ip']}")
 
-PYTHON "$HOST_IP"
+PYTHON
 
 echo ""
 echo "Configuration complete!"

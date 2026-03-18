@@ -62,7 +62,7 @@ else
     # Full system: use pacman
     echo "    Updating package database..."
     pacman -Sy --noconfirm 2>/dev/null || true
-    pacman -S --needed --noconfirm python python-pip openssl 2>/dev/null || true
+    pacman -S --needed --noconfirm python python-pip openssl xdotool 2>/dev/null || true
 fi
 
 # --- Install Python packages ---

@@ -22,7 +22,7 @@ fi
 echo "  [1/5] Installing system dependencies..."
 apt-get update -qq
 apt-get install -y -qq python3 python3-pip python3-venv python3-gi \
-    git xclip xsel wl-clipboard libgirepository1.0-dev \
+    git xdotool xclip xsel wl-clipboard libgirepository1.0-dev \
     gir1.2-appindicator3-0.1 2>/dev/null || true
 echo "  ✓ System packages installed"
 

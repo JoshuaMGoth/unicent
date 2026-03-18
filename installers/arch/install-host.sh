@@ -19,7 +19,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 echo "  [1/5] Installing system dependencies..."
-pacman -Sy --noconfirm --needed python python-pip git xclip xsel \
+pacman -Sy --noconfirm --needed python python-pip git xdotool xclip xsel \
     wl-clipboard python-pillow libappindicator-gtk3 2>/dev/null || true
 echo "  ✓ System packages installed"
 

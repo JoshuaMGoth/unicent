@@ -240,17 +240,17 @@ class HostServer:
             hostname = handshake_msg.get('hostname', client_addr)
             client_id = hostname
 
-            # Reject duplicate connections from same hostname
+            # Evict stale duplicate connection from same hostname
             if hostname in self._connected_hostnames:
                 existing_client_id = self._connected_hostnames[hostname]
-                log.info(f"Rejecting duplicate connection from {hostname} (already connected as {existing_client_id})")
-                try:
-                    writer.write(encode_disconnect('duplicate_connection'))
-                    await writer.drain()
-                except Exception:
-                    pass
-                writer.close()
-                return
+                log.info(f"Evicting stale connection from {hostname} ({existing_client_id}), accepting new one")
+                old_client = self.clients.pop(existing_client_id, None)
+                self._write_buffer.pop(existing_client_id, None)
+                del self._connected_hostnames[hostname]
+                if old_client:
+                    old_client.close()
+                    if self.on_client_disconnected:
+                        self.on_client_disconnected(existing_client_id)
 
             client = ClientConnection(reader, writer, client_id)
             client.hostname = handshake_msg.get('hostname', '')

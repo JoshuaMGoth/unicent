@@ -188,10 +188,12 @@ class UniCentClient:
 
     def _on_connected(self):
         log.info("Connected to host")
-        # Save the host IP for future auto-reconnection
-        if self.host_addr:
-            set_host_ip(self.host_addr)
-        print(f"\n  ● Connected to {self.host_addr}:{self.host_port}")
+        # Save the actual IP used by the connection (not the UDP-discovered one)
+        actual_ip = self.connection.host_addr if self.connection else self.host_addr
+        if actual_ip:
+            self.host_addr = actual_ip
+            set_host_ip(actual_ip)
+        print(f"\n  ● Connected to {actual_ip or self.host_addr}:{self.host_port}")
 
     def _on_disconnected(self):
         self._active = False
@@ -287,13 +289,14 @@ class UniCentClient:
     # ──── Discovery ────────────────────────────────────────
 
     def _on_host_discovered(self, info: dict):
-        """Called when a host is found via discovery."""
+        """Called when a host is found via UDP broadcast discovery."""
         host_ip = info.get('ip', '')
         host_port = info.get('port', 27183)
         hostname = info.get('hostname', host_ip)
         log.info(f"Discovered host: {hostname} at {host_ip}:{host_port}")
         print(f"\n  Discovered host: {hostname} ({host_ip}:{host_port})")
-        if not self.host_addr:
+        # Only set if not already connected (avoid overwriting Tailscale IP with LAN IP)
+        if not self.host_addr and not (self.connection and self.connection.connected):
             self.host_addr = host_ip
             self.host_port = host_port
             if self.connection:

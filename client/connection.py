@@ -181,14 +181,20 @@ class HostConnection:
 
         ssl_ctx = self._create_ssl_context()
 
-        self._reader, self._writer = await asyncio.wait_for(
-            asyncio.open_connection(
-                self.host_addr,
-                self.host_port,
-                ssl=ssl_ctx,
-            ),
-            timeout=10.0,
-        )
+        try:
+            self._reader, self._writer = await asyncio.wait_for(
+                asyncio.open_connection(
+                    self.host_addr,
+                    self.host_port,
+                    ssl=ssl_ctx,
+                ),
+                timeout=10.0,
+            )
+        except (ConnectionError, OSError, asyncio.TimeoutError) as e:
+            log.warning(f"Failed to connect to {self.host_addr}: {e}")
+            # Clear stored address so next loop triggers auto-discovery
+            self.host_addr = None
+            raise
 
         # Set TCP_NODELAY
         sock = self._writer.get_extra_info('socket')

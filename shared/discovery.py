@@ -192,12 +192,27 @@ class DiscoveryListener:
 DEFAULT_PORT = 27183
 
 
+def _find_tailscale_cli() -> str:
+    """Return the path to the tailscale CLI binary."""
+    import shutil, sys
+    ts = shutil.which('tailscale')
+    if ts:
+        return ts
+    if sys.platform == 'darwin':
+        mac_path = '/Applications/Tailscale.app/Contents/MacOS/Tailscale'
+        import os
+        if os.path.isfile(mac_path):
+            return mac_path
+    return 'tailscale'
+
+
 def _get_tailscale_peers() -> list:
     """Get IP addresses of online Tailscale peers."""
     import subprocess
+    ts_bin = _find_tailscale_cli()
     try:
         result = subprocess.run(
-            ['tailscale', 'status', '--json'],
+            [ts_bin, 'status', '--json'],
             capture_output=True, text=True, timeout=5,
         )
         if result.returncode != 0:

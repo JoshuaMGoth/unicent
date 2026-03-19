@@ -50,43 +50,19 @@ cp "$INSTALL_DIR/autostart/com.unicent.client.plist" "$LAUNCH_AGENTS_DIR/"
 echo "  ✓ LaunchAgent installed"
 echo "  Note: To enable, run:  launchctl load ~/Library/LaunchAgents/com.unicent.client.plist"
 
-echo "  [5/5] Creating launch script & app bundle..."
-cat > /usr/local/bin/unicent-client << 'SCRIPT'
-#!/usr/bin/env bash
-cd /usr/local/share/unicent
+echo "  [5/5] Creating app bundle & launch script..."
 
-# Get Python interpreter
-PYTHON=""
-if [[ -f .venv/bin/python3 ]]; then
-    PYTHON=".venv/bin/python3"
-else
-    PYTHON="python3"
-fi
-
-# Read host IP from config if not provided as argument
-HOST_ARG=""
-if [[ ! " $* " =~ " --host " ]]; then
-    # Try to read stored host IP
-    CONFIG_FILE="$HOME/.config/unicent/client.json"
-    if [[ -f "$CONFIG_FILE" ]]; then
-        HOST_IP=$($PYTHON -c "import json; config=json.load(open('$CONFIG_FILE')); print(config.get('host_ip', ''))" 2>/dev/null || echo "")
-        if [[ -n "$HOST_IP" ]]; then
-            HOST_ARG="--host $HOST_IP"
-        fi
-    fi
-fi
-
-# Execute client with optional host argument from config
-exec $PYTHON -m client.main $HOST_ARG "$@"
-SCRIPT
-chmod +x /usr/local/bin/unicent-client
-echo "  ✓ Launch script created at /usr/local/bin/unicent-client"
-
-# Build .app bundle
 APP_DIR="/Applications/UniCent Client.app"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$INSTALL_DIR/assets/UniCent.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
-cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
+
+# Read version from source
+APP_VERSION=$(python3 -c "
+import sys; sys.path.insert(0,'$INSTALL_DIR')
+from shared.version import __version__; print(__version__)
+" 2>/dev/null || echo "1.2.0")
+
+cat > "$APP_DIR/Contents/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -98,9 +74,9 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
     <key>CFBundleIdentifier</key>
     <string>com.unicent.client</string>
     <key>CFBundleVersion</key>
-    <string>1.0</string>
+    <string>$APP_VERSION</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
+    <string>$APP_VERSION</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleExecutable</key>
@@ -116,86 +92,112 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
 </dict>
 </plist>
 PLIST
+
+# Launcher script — does NOT exec to keep the .app process identity
 cat > "$APP_DIR/Contents/MacOS/UniCent Client" << 'LAUNCH'
 #!/usr/bin/env bash
 cd /usr/local/share/unicent
+export PYTHONDONTWRITEBYTECODE=1
 
-# Get Python interpreter
-PYTHON=""
 if [[ -f .venv/bin/python3 ]]; then
     PYTHON=".venv/bin/python3"
 else
     PYTHON="python3"
 fi
 
-# Read host IP from config if not provided as argument
-HOST_ARG=""
-if [[ ! " $* " =~ " --host " ]]; then
-    # Try to read stored host IP
-    CONFIG_FILE="$HOME/.config/unicent/client.json"
-    if [[ -f "$CONFIG_FILE" ]]; then
-        HOST_IP=$($PYTHON -c "import json; config=json.load(open('$CONFIG_FILE')); print(config.get('host_ip', ''))" 2>/dev/null || echo "")
-        if [[ -n "$HOST_IP" ]]; then
-            HOST_ARG="--host $HOST_IP"
-        fi
-    fi
-fi
-
-# Execute client with optional host argument from config
-exec $PYTHON -m client.main $HOST_ARG "$@"
+# Run as child process (not exec) so macOS keeps our app identity
+# for Accessibility permissions and menu bar name
+"$PYTHON" -m client.main "$@"
 LAUNCH
 chmod +x "$APP_DIR/Contents/MacOS/UniCent Client"
+
+# Ad-hoc codesign so macOS treats this as a proper app
+codesign --force --deep -s - "$APP_DIR" 2>/dev/null || true
+
 echo "  ✓ App bundle created at $APP_DIR"
 
-# ── Grant Accessibility permission (required for cursor control) ──
+# CLI wrapper for terminal usage
+cat > /usr/local/bin/unicent-client << 'SCRIPT'
+#!/usr/bin/env bash
+# Open the .app bundle so macOS associates it properly
+open -W -a "UniCent Client" --args "$@"
+SCRIPT
+chmod +x /usr/local/bin/unicent-client
+echo "  ✓ CLI wrapper created at /usr/local/bin/unicent-client"
+
+# ── LaunchAgent for auto-start ──
+LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
+PLIST_PATH="$LAUNCH_AGENTS_DIR/com.unicent.client.plist"
+mkdir -p "$LAUNCH_AGENTS_DIR"
+
+# Stop any existing instance
+launchctl bootout "gui/$(id -u)/com.unicent.client" 2>/dev/null || true
+
+cat > "$PLIST_PATH" << 'AGENT'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.unicent.client</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Applications/UniCent Client.app/Contents/MacOS/UniCent Client</string>
+        <string>--no-tls</string>
+        <string>-v</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/usr/local/share/unicent</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardOutPath</key>
+    <string>/tmp/unicent-client.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/unicent-client.err</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+</dict>
+</plist>
+AGENT
+echo "  ✓ LaunchAgent installed (auto-starts on login)"
+
+# ── Accessibility permission ──
 echo
-echo "  [!] macOS requires Accessibility permission for cursor control."
+echo "  ╔══════════════════════════════════════════════════╗"
+echo "  ║  Accessibility Permission Required               ║"
+echo "  ╚══════════════════════════════════════════════════╝"
+echo
+echo "  UniCent needs Accessibility permission to control"
+echo "  your mouse and keyboard. On first launch, macOS"
+echo "  will prompt you to grant access."
+echo
+echo "  If cursor movement doesn't work:"
+echo "    1. Open System Settings → Privacy & Security → Accessibility"
+echo "    2. Click the + button"
+echo "    3. Add Python (or the Python.app from Xcode's framework)"
+echo "    4. Toggle it ON"
+echo "    5. Restart UniCent"
 echo
 
-# Find the real Python binary that will run UniCent
-PYTHON_BIN=""
-if [[ -f "$INSTALL_DIR/.venv/bin/python3" ]]; then
-    PYTHON_BIN=$("$INSTALL_DIR/.venv/bin/python3" -c "import sys; print(sys.executable)" 2>/dev/null || echo "")
-fi
-if [[ -z "$PYTHON_BIN" ]]; then
-    PYTHON_BIN=$(python3 -c "import sys; print(sys.executable)" 2>/dev/null || echo "")
-fi
-
-# Find the .app bundle containing the Python binary (macOS framework Python)
-PYTHON_APP=""
-if [[ -n "$PYTHON_BIN" ]]; then
-    # Walk up to find a .app bundle
-    _p="$PYTHON_BIN"
-    while [[ "$_p" != "/" ]]; do
-        if [[ "$_p" == *.app ]]; then
-            PYTHON_APP="$_p"
-            break
-        fi
-        _p=$(dirname "$_p")
-    done
-fi
-
-if [[ -n "$PYTHON_APP" ]]; then
-    echo "  The Python binary that needs permission is:"
-    echo "    $PYTHON_APP"
-    echo
-    echo "  Opening System Settings and Finder now..."
-    open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility" 2>/dev/null || true
-    open -R "$PYTHON_APP" 2>/dev/null || true
-    echo
-    echo "  ➜  Drag 'Python.app' from the Finder window into the"
-    echo "     Accessibility list in System Settings, then toggle it ON."
-else
-    echo "  System Settings → Privacy & Security → Accessibility"
-    echo "  Add the Python binary used by UniCent to the list."
-    echo "  (Run: python3 -c 'import sys; print(sys.executable)' to find it)"
-fi
-
-echo
 echo "  ══════════════════════════════════════"
 echo "  ✓ UniCent Client installed!"
 echo "  ══════════════════════════════════════"
 echo
-echo "  Run:     unicent-client --host <HOST_IP> --no-tls -v"
-echo "  Or:      Open 'UniCent Client' from Applications"
+echo "  Starting UniCent..."
+launchctl bootstrap "gui/$(id -u)" "$PLIST_PATH" 2>/dev/null || true
+echo "  ✓ UniCent is running — look for the U icon in your menu bar"
+echo
+echo "  To stop:   launchctl bootout gui/\$(id -u)/com.unicent.client"
+echo "  To start:  launchctl bootstrap gui/\$(id -u) $PLIST_PATH"
 echo

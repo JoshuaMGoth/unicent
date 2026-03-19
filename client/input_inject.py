@@ -547,20 +547,9 @@ def check_accessibility_permissions() -> bool:
 
 
 def request_accessibility_permissions():
-    """Prompt user to grant required permissions."""
+    """Prompt user to grant required permissions — GUI dialog on macOS."""
     if _SYSTEM == 'Darwin':
-        print("\n  ⚠  Accessibility permissions required!")
-        print()
-        print("  macOS requires Accessibility access to inject input events.")
-        print("  1. Open System Settings → Privacy & Security → Accessibility")
-        print("  2. Add your Terminal app and enable the toggle")
-        print("  3. Restart this application")
-        print()
-        try:
-            subprocess.run(['open', 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'],
-                           check=False)
-        except Exception:
-            pass
+        _show_macos_accessibility_dialog()
     elif _SYSTEM == 'Linux':
         print("\n  ⚠  xdotool is required for input injection on Linux.")
         print("  Install it:")
@@ -569,6 +558,69 @@ def request_accessibility_permissions():
         print()
     elif _SYSTEM == 'Windows':
         print("  No special permissions needed on Windows.")
+
+
+def _show_macos_accessibility_dialog():
+    """Show a friendly macOS dialog explaining how to grant Accessibility."""
+    try:
+        import rumps
+        response = rumps.alert(
+            title='UniCent needs Accessibility Permission',
+            message=(
+                'UniCent needs Accessibility access to control your '
+                'mouse and keyboard.\n\n'
+                '1. Click "Open Settings" below\n'
+                '2. Click the + button\n'
+                '3. Navigate to Applications → Xcode → Contents → '
+                'Developer → Library → Frameworks → Python3.framework '
+                '→ Versions → 3.9 → Resources → Python.app\n'
+                '   (or search for "Python")\n'
+                '4. Toggle it ON\n'
+                '5. Restart UniCent'
+            ),
+            ok='Open Settings',
+            cancel='Later',
+        )
+        if response == 1:  # OK/Open Settings clicked
+            subprocess.run(
+                ['open', 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'],
+                check=False,
+            )
+        return
+    except Exception:
+        pass
+    # Fallback: try tkinter
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+        root = tk.Tk()
+        root.withdraw()
+        result = messagebox.askokcancel(
+            'UniCent — Accessibility Permission Required',
+            'UniCent needs Accessibility access to control your '
+            'mouse and keyboard.\n\n'
+            '1. Click OK to open System Settings\n'
+            '2. Click the + button\n'
+            '3. Add "Python" (or the Python.app from your framework)\n'
+            '4. Toggle it ON, then restart UniCent',
+        )
+        root.destroy()
+        if result:
+            subprocess.run(
+                ['open', 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'],
+                check=False,
+            )
+        return
+    except Exception:
+        pass
+    # Final fallback: terminal
+    print("\n  ⚠  Accessibility permissions required!")
+    print("  System Settings → Privacy & Security → Accessibility")
+    print("  Add Python and toggle it ON, then restart UniCent.")
+    subprocess.run(
+        ['open', 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'],
+        check=False,
+    )
 
 
 # ────────────────────────────────────────────────────────────

@@ -7,7 +7,7 @@
     <string>com.unicent.client</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/unicent-client</string>
+        <string>/Applications/UniCent Client.app/Contents/MacOS/UniCent Client</string>
         <string>--no-tls</string>
         <string>-v</string>
     </array>

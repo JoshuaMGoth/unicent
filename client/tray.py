@@ -25,6 +25,18 @@ log = logging.getLogger(__name__)
 
 _SYSTEM = platform.system()
 
+# ─── macOS: override NSBundle name BEFORE any NSApplication is created ───
+# This changes the menu bar app name from "Python" to "UniCent Client".
+if _SYSTEM == 'Darwin':
+    try:
+        from Foundation import NSBundle
+        _bundle = NSBundle.mainBundle()
+        _info = _bundle.infoDictionary()
+        _info['CFBundleName'] = 'UniCent Client'
+        _info['CFBundleDisplayName'] = 'UniCent Client'
+    except Exception:
+        pass
+
 TRAY_AVAILABLE = False
 _USE_RUMPS = False
 

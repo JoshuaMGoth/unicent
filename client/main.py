@@ -85,10 +85,8 @@ class UniCentClient:
 
         # 1. Check permissions (macOS accessibility, etc.)
         if not check_accessibility_permissions():
-            print("  ⚠  Accessibility permissions not granted.")
-            print("     On macOS: System Settings → Privacy → Accessibility")
-            print("     On Linux: ensure xdotool is installed")
-            print()
+            from client.input_inject import request_accessibility_permissions
+            request_accessibility_permissions()
 
         # 2. Detect screens
         self._screens = get_client_screens()

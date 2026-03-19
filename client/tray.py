@@ -4,7 +4,8 @@ Client system tray / menu bar icon — cross-platform.
 Uses rumps on macOS (native menu bar), pystray on Linux/Windows.
 Icon: Purple rounded-rectangle with white 'U'.
 
-Includes About, Check for Updates, and Report a Bug.
+Features: status display, host search, manual IP entry,
+auto-update checking, about, and bug report.
 """
 
 import os
@@ -111,10 +112,10 @@ def _show_about():
         log.warning(f"Could not show About dialog: {e}")
 
 
-def _show_updates():
+def _show_updates(update_info=None):
     try:
         from shared.dialogs import show_update_dialog
-        show_update_dialog()
+        show_update_dialog(update_info=update_info)
     except Exception as e:
         log.warning(f"Could not show Update dialog: {e}")
 
@@ -127,6 +128,45 @@ def _show_bug_report():
         log.warning(f"Could not show Bug Report dialog: {e}")
 
 
+def _search_for_host(client: 'UniCentClient'):
+    """Scan Tailscale peers for a UniCent host and connect."""
+    def _do_scan():
+        try:
+            from shared.discovery import scan_for_host
+            log.info("Scanning for hosts...")
+            found = scan_for_host()
+            if found:
+                log.info(f"Found host at {found}")
+                client.host_addr = found
+                if client.connection:
+                    client.connection.host_addr = found
+                    if not client.connection.connected:
+                        client.connection.stop()
+                        time.sleep(0.3)
+                        client.connection.start()
+            else:
+                log.info("No host found on network")
+        except Exception as e:
+            log.warning(f"Host scan failed: {e}")
+    threading.Thread(target=_do_scan, daemon=True).start()
+
+
+def _set_host_ip(client: 'UniCentClient', ip: str):
+    """Manually set the host IP and reconnect."""
+    ip = ip.strip()
+    if not ip:
+        return
+    log.info(f"Manually setting host to {ip}")
+    from client.config import set_host_ip
+    set_host_ip(ip)
+    client.host_addr = ip
+    if client.connection:
+        client.connection.host_addr = ip
+        client.connection.stop()
+        time.sleep(0.3)
+        client.connection.start()
+
+
 # ─── macOS: rumps-based menu bar app ───────────────────────────
 
 if _USE_RUMPS:
@@ -137,6 +177,7 @@ if _USE_RUMPS:
             self._client = client
             self._connected = False
             self._active = False
+            self._update_info = None
             icon_path = _get_u_icon_path(32)
             super().__init__(
                 name='UniCent',
@@ -145,6 +186,7 @@ if _USE_RUMPS:
                 template=True,
             )
             self._build_menu()
+            self._check_updates_async()
 
         def _build_menu(self):
             self.menu.clear()
@@ -165,10 +207,20 @@ if _USE_RUMPS:
             if not self._connected and host_addr:
                 items.append(rumps.MenuItem(
                     'Reconnect', callback=self._on_reconnect))
-                items.append(None)
+
+            # Host discovery
+            items.append(None)
+            items.append(rumps.MenuItem(
+                'Search for Host...', callback=self._on_search_host))
+            items.append(rumps.MenuItem(
+                'Set Host IP...', callback=self._on_set_host_ip))
 
             # Tools
             items.append(None)
+            if self._update_info:
+                items.append(rumps.MenuItem(
+                    f'⬆ Update available: v{self._update_info["latest"]}',
+                    callback=self._on_updates))
             items.append(rumps.MenuItem(
                 'Check for Updates...', callback=self._on_updates))
             items.append(rumps.MenuItem(
@@ -181,7 +233,6 @@ if _USE_RUMPS:
             items.append(rumps.MenuItem(
                 'Quit UniCent', callback=self._on_quit))
 
-            # Assign all items at once (rumps.Menu doesn't support append)
             self.menu = items
 
         def update_status(self, connected: bool, active: bool = False):
@@ -202,11 +253,25 @@ if _USE_RUMPS:
                 time.sleep(0.5)
                 conn.start()
 
+        def _on_search_host(self, sender=None):
+            _search_for_host(self._client)
+
+        def _on_set_host_ip(self, sender=None):
+            response = rumps.Window(
+                message='Enter the host IP address:',
+                title='Set Host IP',
+                default_text=getattr(self._client, 'host_addr', '') or '',
+                ok='Connect',
+                cancel='Cancel',
+            ).run()
+            if response.clicked:
+                _set_host_ip(self._client, response.text)
+
         def _on_about(self, sender=None):
             _show_about()
 
         def _on_updates(self, sender=None):
-            _show_updates()
+            _show_updates(self._update_info)
 
         def _on_bug_report(self, sender=None):
             _show_bug_report()
@@ -214,6 +279,19 @@ if _USE_RUMPS:
         def _on_quit(self, sender=None):
             self._client._running = False
             rumps.quit_application()
+
+        def _check_updates_async(self):
+            try:
+                from shared.updater import check_for_update_async
+                def _on_result(info):
+                    if info:
+                        self._update_info = info
+                        log.info(f"Update available: v{info['latest']} "
+                                 f"(current: v{info['current']})")
+                        self._build_menu()
+                check_for_update_async(_on_result)
+            except Exception as e:
+                log.debug(f"Background update check failed: {e}")
 
 
 # ─── Cross-platform: pystray-based tray ───────────────────────
@@ -227,6 +305,7 @@ class _PystrayClientTray:
         self._thread: Optional[threading.Thread] = None
         self._connected = False
         self._active = False
+        self._update_info: Optional[dict] = None
 
     def start(self):
         try:
@@ -242,6 +321,7 @@ class _PystrayClientTray:
         )
         self._thread = threading.Thread(target=self._run_icon, daemon=True)
         self._thread.start()
+        self._check_updates_async()
 
     def _run_icon(self):
         try:
@@ -259,10 +339,12 @@ class _PystrayClientTray:
     def update_status(self, connected: bool, active: bool = False):
         self._connected = connected
         self._active = active
+        self.update_menu()
+
+    def update_menu(self):
         if self._icon:
             self._icon.menu = self._build_menu()
-            tooltip = __app_name__
-            self._icon.title = tooltip
+            self._icon.title = __app_name__
             try:
                 self._icon.update_menu()
             except Exception:
@@ -287,9 +369,20 @@ class _PystrayClientTray:
             items.append(MenuItem('Reconnect', lambda: self._reconnect()))
             items.append(Menu.SEPARATOR)
 
+        # Host discovery
+        items.append(MenuItem('Search for Host...',
+                              lambda: _search_for_host(self.client)))
+        items.append(MenuItem('Set Host IP...',
+                              lambda: self._prompt_host_ip()))
+        items.append(Menu.SEPARATOR)
+
         # Tools
+        if self._update_info:
+            items.append(MenuItem(
+                f'⬆ Update available: v{self._update_info["latest"]}',
+                lambda: _show_updates(self._update_info)))
         items.append(MenuItem('Check for Updates...',
-                              lambda: _show_updates()))
+                              lambda: _show_updates(self._update_info)))
         items.append(MenuItem('Report a Bug...',
                               lambda: _show_bug_report()))
         items.append(Menu.SEPARATOR)
@@ -306,9 +399,37 @@ class _PystrayClientTray:
             time.sleep(0.5)
             conn.start()
 
+    def _prompt_host_ip(self):
+        """Prompt user for host IP using a simple dialog."""
+        try:
+            from shared.dialogs import show_input_dialog
+            ip = show_input_dialog(
+                title='Set Host IP',
+                prompt='Enter the host IP address:',
+                default=getattr(self.client, 'host_addr', '') or '',
+            )
+            if ip:
+                _set_host_ip(self.client, ip)
+        except Exception:
+            # Fallback: use stdin if no GUI dialog available
+            log.info("Enter host IP in the terminal")
+
     def _quit(self):
         self.client._running = False
         self.stop()
+
+    def _check_updates_async(self):
+        try:
+            from shared.updater import check_for_update_async
+            def _on_result(info):
+                if info:
+                    self._update_info = info
+                    log.info(f"Update available: v{info['latest']} "
+                             f"(current: v{info['current']})")
+                    self.update_menu()
+            check_for_update_async(_on_result)
+        except Exception as e:
+            log.debug(f"Background update check failed: {e}")
 
 
 # ─── Unified wrapper class ────────────────────────────────────

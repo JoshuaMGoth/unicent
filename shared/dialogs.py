@@ -451,3 +451,51 @@ def show_settings_dialog(host=None):
     root.attributes('-topmost', True)
     root.focus_force()
     root.mainloop()
+
+
+# ────────────────────────────────────────────────────────────
+#  Simple Input Dialog
+# ────────────────────────────────────────────────────────────
+
+def show_input_dialog(title: str = 'Input', prompt: str = 'Enter value:',
+                      default: str = '') -> Optional[str]:
+    """Show a blocking input dialog and return the entered string, or None."""
+    root = _ensure_tk()
+    if root is None:
+        return None
+    root.title(title)
+    bg, fg, accent, btn_bg, entry_bg = _apply_theme(root)
+
+    result = [None]
+
+    _ttk.Label(root, text=prompt, style='TLabel').pack(
+        padx=16, pady=(16, 4), anchor='w')
+    entry_var = _tk.StringVar(value=default)
+    entry = _ttk.Entry(root, textvariable=entry_var, width=40,
+                       font=('Helvetica', 11))
+    entry.pack(padx=16, pady=4, fill='x')
+    entry.focus_set()
+    entry.select_range(0, 'end')
+
+    btn_frame = _ttk.Frame(root, style='TFrame')
+    btn_frame.pack(padx=16, pady=(8, 16), fill='x')
+
+    def _ok():
+        result[0] = entry_var.get().strip()
+        root.destroy()
+
+    def _cancel():
+        root.destroy()
+
+    entry.bind('<Return>', lambda e: _ok())
+    entry.bind('<Escape>', lambda e: _cancel())
+
+    _ttk.Button(btn_frame, text='OK', style='Accent.TButton',
+                command=_ok).pack(side='right', padx=(4, 0))
+    _ttk.Button(btn_frame, text='Cancel', command=_cancel).pack(side='right')
+
+    _center_window(root, 350, 140)
+    root.attributes('-topmost', True)
+    root.focus_force()
+    root.mainloop()
+    return result[0]

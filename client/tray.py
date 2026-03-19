@@ -36,6 +36,22 @@ if _SYSTEM == 'Darwin':
         _info['CFBundleDisplayName'] = 'UniCent Client'
     except Exception:
         pass
+    # Set the application icon so macOS shows our icon everywhere
+    try:
+        from AppKit import NSApplication, NSImage
+        _icon_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            'assets',
+        )
+        for _sz in (128, 64, 256, 48, 32):
+            _candidate = os.path.join(_icon_dir, f'icon-u-{_sz}.png')
+            if os.path.exists(_candidate):
+                _ns_img = NSImage.alloc().initWithContentsOfFile_(_candidate)
+                if _ns_img:
+                    NSApplication.sharedApplication().setApplicationIconImage_(_ns_img)
+                break
+    except Exception:
+        pass
 
 TRAY_AVAILABLE = False
 _USE_RUMPS = False
@@ -190,12 +206,12 @@ if _USE_RUMPS:
             self._connected = False
             self._active = False
             self._update_info = None
-            icon_path = _get_u_icon_path(32)
+            icon_path = _get_u_icon_path(16) or _get_u_icon_path(32)
             super().__init__(
                 name='UniCent',
                 title=None,
                 icon=icon_path,
-                template=True,
+                template=False,
             )
             self._build_menu()
             self._check_updates_async()

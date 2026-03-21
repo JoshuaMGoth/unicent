@@ -115,6 +115,13 @@ class _MacOSInjector:
         new_y = max(self._min_y, min(self._cursor_y + dy, self._max_y - 1))
         self._cursor_x = new_x
         self._cursor_y = new_y
+        point = Q.CGPointMake(new_x, new_y)
+
+        # On some macOS setups, posted relative move events are delivered but
+        # don't visibly move the cursor. A direct warp guarantees movement.
+        Q.CGWarpMouseCursorPosition(point)
+        Q.CGAssociateMouseAndMouseCursorPosition(True)
+
         if 0 in self._buttons_pressed:
             et = Q.kCGEventLeftMouseDragged
         elif 1 in self._buttons_pressed:
@@ -123,7 +130,6 @@ class _MacOSInjector:
             et = Q.kCGEventOtherMouseDragged
         else:
             et = Q.kCGEventMouseMoved
-        point = Q.CGPointMake(new_x, new_y)
         event = Q.CGEventCreateMouseEvent(self._source, et, point, 0)
         if event:
             Q.CGEventSetIntegerValueField(event, Q.kCGMouseEventDeltaX, dx)
@@ -135,6 +141,8 @@ class _MacOSInjector:
         self._cursor_x = float(x)
         self._cursor_y = float(y)
         point = Q.CGPointMake(x, y)
+        Q.CGWarpMouseCursorPosition(point)
+        Q.CGAssociateMouseAndMouseCursorPosition(True)
         event = Q.CGEventCreateMouseEvent(self._source, Q.kCGEventMouseMoved, point, 0)
         if event:
             Q.CGEventPost(Q.kCGHIDEventTap, event)

@@ -39,6 +39,7 @@ _SYSTEM = platform.system()
 #  Cross-platform cursor read / warp
 # ────────────────────────────────────────────────────────────
 
+
 def _read_cursor_position():
     """Read current cursor position → (x, y) or None."""
     if _SYSTEM == 'Linux':
@@ -147,6 +148,11 @@ class UniCentHost:
         self._pending_clipboard: str = ''  # clipboard received from client
         self._last_switch_time: float = 0.0
         self._current_remote: str = ''
+        self._host_return_intent: int = 0
+        self._host_return_threshold: int = 120
+
+        # Cooldown: ignore edge crossings for this long after returning to host
+        self._last_host_return: float = 0.0
 
     # ──── Lifecycle ────────────────────────────────────────
 
@@ -252,25 +258,40 @@ class UniCentHost:
 
     def _on_mouse_move(self, dx: int, dy: int):
         if not self._controlling_remote:
-            # Local mode → track cursor via layout for edge detection
-            new_machine = self.layout.move_cursor(dx, dy)
-            if new_machine and new_machine != 'host':
-                self._switch_to_machine(new_machine)
+            # Local mode — track cursor via deltas and detect edge crossing.
+            # Brief cooldown after returning from remote prevents re-triggering
+            # while the physical cursor is still near the screen edge.
+            self.layout.move_cursor(dx, dy)
+            if time.time() - self._last_host_return > 1.0:
+                new_machine = self.layout.active_machine
+                if new_machine != 'host':
+                    log.info(f"Edge crossing → {new_machine}")
+                    self._switch_to_machine(new_machine)
         else:
             # Remote mode → forward to active client via layout
+            old_x = self.layout._cursor_x
             new_machine = self.layout.move_cursor(dx, dy)
             if new_machine == 'host':
-                # Prevent immediate bounce-back from jitter
-                if time.time() - self._last_switch_time < 0.15:
-                    self.layout._active_machine = self._current_remote
-                    for m in self.layout.machines:
-                        if m.machine_id == self._current_remote:
-                            self.layout._cursor_x = max(m.left, min(self.layout._cursor_x, m.right - 1))
-                            break
-                    self.server.forward_mouse_move(dx, dy)
-                else:
+                elapsed = time.time() - self._last_switch_time
+                log.debug(f"[BOUNCE] cursor→host dx={dx} old_x={old_x} new_x={self.layout._cursor_x} elapsed={elapsed:.3f}s")
+                # Require sustained intent at the return edge to switch back.
+                self._host_return_intent += 1
+                self.layout._active_machine = self._current_remote
+                for m in self.layout.machines:
+                    if m.machine_id == self._current_remote:
+                        self.layout._cursor_x = max(m.left, min(self.layout._cursor_x, m.right - 1))
+                        break
+                self.server.forward_mouse_move(dx, dy)
+
+                if elapsed >= 0.5 and self._host_return_intent >= self._host_return_threshold:
+                    log.info(
+                        f"[SWITCH] Returning to host "
+                        f"(elapsed={elapsed:.3f}s, intent={self._host_return_intent})"
+                    )
+                    self._host_return_intent = 0
                     self._switch_to_host()
             else:
+                self._host_return_intent = 0
                 self.server.forward_mouse_move(dx, dy)
 
     def _on_mouse_button(self, button: int, state: int):
@@ -312,16 +333,17 @@ class UniCentHost:
         self._controlling_remote = True
         self._current_remote = machine_id
         self._last_switch_time = time.time()
+        self._host_return_intent = 0
         self.server.set_active_client(machine_id)
         self.capture.grab()
 
-        # Push cursor slightly inward from boundary to absorb jitter
+        # Place cursor at center of the client screen to prevent
+        # immediate bounce-back from being too close to the boundary.
         for m in self.layout.machines:
             if m.machine_id == machine_id:
-                if self.layout._cursor_x <= m.left + 1:
-                    self.layout._cursor_x = m.left + 4
-                elif self.layout._cursor_x >= m.right - 2:
-                    self.layout._cursor_x = m.right - 5
+                self.layout._cursor_x = m.left + m.total_width // 2
+                # Keep the y position from the physical cursor
+                self.layout._cursor_y = max(m.top, min(self.layout._cursor_y, m.bottom - 1))
                 break
 
         lx, ly = self.layout.get_local_cursor(machine_id)
@@ -344,6 +366,18 @@ class UniCentHost:
         self.capture.ungrab()
         self.server.set_active_client(None)
         self.layout._active_machine = 'host'
+        self._last_host_return = time.time()
+
+        # Push the virtual cursor away from the boundary so the next small
+        # delta doesn't immediately re-trigger an edge crossing.
+        for m in self.layout.machines:
+            if m.machine_id == 'host':
+                inset = 300
+                if self.client_side == 'left':
+                    self.layout._cursor_x = max(self.layout._cursor_x, m.left + inset)
+                else:
+                    self.layout._cursor_x = min(self.layout._cursor_x, m.right - 1 - inset)
+                break
 
         # Apply any pending clipboard that wasn't set yet
         if self._pending_clipboard:
@@ -355,7 +389,6 @@ class UniCentHost:
                 log.warning(f"Pending clipboard apply failed: {e}")
             self._pending_clipboard = ''
 
-        # Warp local cursor to layout position
         lx, ly = self.layout.get_local_cursor('host')
         _warp_cursor(lx, ly)
 

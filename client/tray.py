@@ -14,6 +14,7 @@ import platform
 import threading
 import logging
 import time
+import queue
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -206,6 +207,7 @@ if _USE_RUMPS:
             self._connected = False
             self._active = False
             self._update_info = None
+            self._ui_updates: queue.Queue = queue.Queue()
             icon_path = _get_u_icon_path(16) or _get_u_icon_path(32)
             super().__init__(
                 name='UniCent',
@@ -214,6 +216,10 @@ if _USE_RUMPS:
                 template=False,
             )
             self._build_menu()
+            # rumps timers run on the app loop (main thread). Use this
+            # to safely apply UI mutations queued by worker threads.
+            self._ui_timer = rumps.Timer(self._drain_ui_updates, 0.2)
+            self._ui_timer.start()
             self._check_updates_async()
 
         def _build_menu(self):
@@ -263,7 +269,7 @@ if _USE_RUMPS:
 
             self.menu = items
 
-        def update_status(self, connected: bool, active: bool = False):
+        def _set_status(self, connected: bool, active: bool = False):
             self._connected = connected
             self._active = active
             self._build_menu()
@@ -273,6 +279,37 @@ if _USE_RUMPS:
                 self.title = None
             else:
                 self.title = '✕'
+
+        def update_status(self, connected: bool, active: bool = False):
+            if threading.current_thread() is threading.main_thread():
+                self._set_status(connected, active)
+            else:
+                self.enqueue_status(connected, active)
+
+        def enqueue_status(self, connected: bool, active: bool = False):
+            self._ui_updates.put(('status', (connected, active)))
+
+        def enqueue_update_info(self, info: Optional[dict]):
+            self._ui_updates.put(('update_info', info))
+
+        def _drain_ui_updates(self, _sender=None):
+            latest_status = None
+            latest_update = None
+            while True:
+                try:
+                    kind, payload = self._ui_updates.get_nowait()
+                except queue.Empty:
+                    break
+                if kind == 'status':
+                    latest_status = payload
+                elif kind == 'update_info':
+                    latest_update = payload
+
+            if latest_status is not None:
+                self._set_status(*latest_status)
+            if latest_update is not None:
+                self._update_info = latest_update
+                self._build_menu()
 
         def _on_reconnect(self, sender=None):
             conn = getattr(self._client, 'connection', None)
@@ -313,10 +350,9 @@ if _USE_RUMPS:
                 from shared.updater import check_for_update_async
                 def _on_result(info):
                     if info:
-                        self._update_info = info
+                        self.enqueue_update_info(info)
                         log.info(f"Update available: v{info['latest']} "
                                  f"(current: v{info['current']})")
-                        self._build_menu()
                 check_for_update_async(_on_result)
             except Exception as e:
                 log.debug(f"Background update check failed: {e}")
@@ -486,17 +522,17 @@ class ClientTray:
             def on_connected_wrapper():
                 original_on_connected()
                 if self.app:
-                    self.app.update_status(connected=True, active=False)
+                    self.app.enqueue_status(connected=True, active=False)
 
             def on_disconnected_wrapper():
                 original_on_disconnected()
                 if self.app:
-                    self.app.update_status(connected=False, active=False)
+                    self.app.enqueue_status(connected=False, active=False)
 
             def on_switch_active_wrapper(target, x, y):
                 original_on_switch_active(target, x, y)
                 if self.app:
-                    self.app.update_status(
+                    self.app.enqueue_status(
                         connected=True, active=bool(target))
 
             # Start client logic in background

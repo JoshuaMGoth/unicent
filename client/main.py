@@ -15,6 +15,7 @@ import os
 import platform
 import signal
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -28,6 +29,24 @@ from client.config import get_host_ip, set_host_ip
 log = logging.getLogger(__name__)
 
 _SYSTEM = platform.system()
+
+
+def _send_notification(title: str, message: str):
+    """Send a desktop notification (best-effort, never raises)."""
+    try:
+        if _SYSTEM == 'Darwin':
+            import rumps
+            rumps.notification(title, '', message)
+        elif _SYSTEM == 'Linux':
+            subprocess.Popen(
+                ['notify-send', title, message],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        elif _SYSTEM == 'Windows':
+            from plyer import notification as plyer_notif
+            plyer_notif.notify(title=title, message=message, timeout=5)
+    except Exception:
+        pass
 
 
 class UniCentClient:
@@ -75,6 +94,7 @@ class UniCentClient:
         self._hostname = socket.gethostname()
         self._screens: list = []
         self._lock = threading.Lock()
+        self._received_move_count: int = 0
 
     # ──── Lifecycle ────────────────────────────────────────
 
@@ -192,16 +212,24 @@ class UniCentClient:
             self.host_addr = actual_ip
             set_host_ip(actual_ip)
         print(f"\n  ● Connected to {actual_ip or self.host_addr}:{self.host_port}")
+        _send_notification('UniCent', f'Connected to {actual_ip or self.host_addr}')
 
     def _on_disconnected(self):
         self._active = False
         log.info("Disconnected from host")
         print("\n  ○ Disconnected from host")
+        _send_notification('UniCent', 'Disconnected from host')
 
     # ──── Input event callbacks ────────────────────────────
 
     def _on_mouse_move(self, dx: int, dy: int):
         if self._active and self.injector:
+            self._received_move_count += 1
+            if self._received_move_count % 200 == 0:
+                log.debug(
+                    f"Received mouse moves: {self._received_move_count} "
+                    f"(latest dx={dx}, dy={dy})"
+                )
             self.injector.move_mouse_relative(dx, dy)
 
     def _on_mouse_move_abs(self, x: int, y: int):

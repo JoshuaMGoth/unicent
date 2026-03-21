@@ -123,6 +123,7 @@ class HostServer:
         # Buffered writes for high-frequency events
         self._write_buffer: Dict[str, list] = {}
         self._flush_task: Optional[asyncio.Task] = None
+        self._move_forward_count: int = 0
 
     def set_host_info(self, hostname: str, screens: list, layout: list):
         """Set host information for handshake."""
@@ -214,21 +215,27 @@ class HostServer:
         client: Optional[ClientConnection] = None
 
         try:
-            # Read handshake with timeout
-            handshake_data = await asyncio.wait_for(
-                reader.read(4096), timeout=10.0
-            )
-            if not handshake_data:
-                writer.close()
-                return
-
-            msg_reader.feed(handshake_data)
-            messages = msg_reader.read_messages()
-
+            # Read handshake with timeout — loop until we get a complete
+            # message, because large clipboards can exceed a single read.
             handshake_msg = None
-            for msg_type, data in messages:
-                if msg_type == MsgType.HANDSHAKE:
-                    handshake_msg = data
+            deadline = asyncio.get_event_loop().time() + 10.0
+            while True:
+                remaining = deadline - asyncio.get_event_loop().time()
+                if remaining <= 0:
+                    break
+                handshake_data = await asyncio.wait_for(
+                    reader.read(65536), timeout=remaining
+                )
+                if not handshake_data:
+                    writer.close()
+                    return
+                msg_reader.feed(handshake_data)
+                messages = msg_reader.read_messages()
+                for msg_type, data in messages:
+                    if msg_type == MsgType.HANDSHAKE:
+                        handshake_msg = data
+                        break
+                if handshake_msg:
                     break
 
             if not handshake_msg:
@@ -341,6 +348,12 @@ class HostServer:
         """Forward a relative mouse move to the active client."""
         if not self._active_client:
             return
+        self._move_forward_count += 1
+        if self._move_forward_count % 200 == 0:
+            log.debug(
+                f"Forwarded mouse moves: {self._move_forward_count} "
+                f"(latest dx={dx}, dy={dy}, active={self._active_client})"
+            )
         data = encode_mouse_move(dx, dy)
         self._buffer_write(self._active_client, data)
 

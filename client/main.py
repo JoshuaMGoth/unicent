@@ -219,6 +219,11 @@ class UniCentClient:
         log.info("Disconnected from host")
         print("\n  ○ Disconnected from host")
         _send_notification('UniCent', 'Disconnected from host')
+        # Restore stored host IP so next reconnect tries it directly
+        # instead of falling back to (often-unavailable) auto-discovery.
+        stored = get_host_ip() or self.host_addr
+        if stored and self.connection:
+            self.connection.host_addr = stored
 
     # ──── Input event callbacks ────────────────────────────
 

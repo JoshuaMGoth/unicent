@@ -125,6 +125,32 @@ pip install pystray Pillow   # Linux/Windows
 python3 -m client.main --host <HOST_IP> --no-tls -v
 ```
 
+### Option 3: Linux Application Launcher (from this repo checkout)
+
+If you want UniCent to appear in your desktop environment's applications list, install user-level launchers:
+
+```bash
+chmod +x ./install_linux_applications.sh
+./install_linux_applications.sh
+```
+
+This creates:
+
+- `~/.local/share/applications/unicent-host.desktop`
+- `~/.local/share/applications/unicent-client.desktop`
+
+Launcher behavior:
+
+- `UniCent Host` starts `./run_host.sh --no-tls --client-side left`
+- `UniCent Client` starts `./run_client.sh --no-tls`
+- The client reuses the saved host IP from `~/.config/unicent/client.json` after the first successful connection
+
+If Linux host input capture fails, add your user to the `input` group and log out/in:
+
+```bash
+sudo usermod -aG input "$USER"
+```
+
 ## Usage
 
 ### Host

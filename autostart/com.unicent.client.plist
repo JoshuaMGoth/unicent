@@ -7,7 +7,9 @@
     <string>com.unicent.client</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Applications/UniCent Client.app/Contents/MacOS/UniCent Client</string>
+        <string>/usr/bin/python3</string>
+        <string>-m</string>
+        <string>client.main</string>
         <string>--no-tls</string>
         <string>-v</string>
     </array>

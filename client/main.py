@@ -237,6 +237,7 @@ class UniCentClient:
             self.injector.move_mouse_absolute(x, y)
 
     def _on_mouse_button(self, button: int, state: int):
+        log.debug("MOUSE_BUTTON received button=%s state=%s active=%s", button, state, self._active)
         if self._active and self.injector:
             self.injector.mouse_button(button, state)
 
@@ -357,6 +358,63 @@ class UniCentClient:
 #  CLI entry-point
 # ────────────────────────────────────────────────────────────
 
+def _acquire_instance_lock() -> bool:
+    """Acquire an exclusive lock to enforce single-instance.
+
+    Uses a lockfile + flock() / LockFileEx so the lock is automatically
+    released when the process exits (even if killed), meaning launchd /
+    systemd can safely restart the client and the new instance will always
+    acquire the lock rather than seeing a stale PID.
+
+    Returns True if this process now holds the lock, False if another
+    instance is already running (caller should exit).
+    """
+    import tempfile
+    lock_path = os.path.join(tempfile.gettempdir(), 'unicent-client.lock')
+
+    if _SYSTEM in ('Darwin', 'Linux'):
+        import fcntl
+        # O_CREAT | O_WRONLY so the file is created if missing
+        fd = os.open(lock_path, os.O_CREAT | os.O_WRONLY, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(fd)
+            return False
+        # Write our PID for diagnostic purposes; intentionally keep fd open
+        # (closing it would release the lock)
+        try:
+            os.ftruncate(fd, 0)
+            os.write(fd, str(os.getpid()).encode())
+        except OSError:
+            pass
+        # Leak fd intentionally — lock lives as long as the process does.
+        # Register cleanup just in case of graceful shutdown.
+        import atexit
+        def _release():
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+                os.close(fd)
+                os.unlink(lock_path)
+            except OSError:
+                pass
+        atexit.register(_release)
+        return True
+
+    elif _SYSTEM == 'Windows':
+        import msvcrt
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_WRONLY, 0o600)
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            import atexit
+            atexit.register(lambda: os.close(fd))
+            return True
+        except OSError:
+            return False
+
+    return True  # unknown platform — allow startup
+
+
 def main():
     parser = argparse.ArgumentParser(description='UniCent Client')
     parser.add_argument('--host', default='', help='Host IP address / hostname')
@@ -374,6 +432,10 @@ def main():
         format='%(asctime)s [%(name)s] %(levelname)s: %(message)s',
         datefmt='%H:%M:%S',
     )
+
+    if not _acquire_instance_lock():
+        print("UniCent Client is already running — exiting.")
+        sys.exit(0)
 
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 

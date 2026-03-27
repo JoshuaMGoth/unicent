@@ -20,9 +20,14 @@ from typing import Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from client.main import UniCentClient
 
-from shared.version import __version__, __app_name__
+from shared.version import __version__, __app_name__, __author__, __website__, __repo_url__, __description__
 
 log = logging.getLogger(__name__)
+
+# Cache version info for native dialogs (avoids importing shared.dialogs/tkinter)
+_about_author = __author__
+_about_website = __website__
+_about_repo_url = __repo_url__
 
 _SYSTEM = platform.system()
 
@@ -295,6 +300,7 @@ if _USE_RUMPS:
         def _drain_ui_updates(self, _sender=None):
             latest_status = None
             latest_update = None
+            pending_update_alert = None
             while True:
                 try:
                     kind, payload = self._ui_updates.get_nowait()
@@ -304,12 +310,18 @@ if _USE_RUMPS:
                     latest_status = payload
                 elif kind == 'update_info':
                     latest_update = payload
+                elif kind == 'show_update_alert':
+                    pending_update_alert = payload
 
             if latest_status is not None:
                 self._set_status(*latest_status)
             if latest_update is not None:
                 self._update_info = latest_update
                 self._build_menu()
+            if pending_update_alert is not None:
+                self._update_info = pending_update_alert
+                self._build_menu()
+                self._on_updates()
 
         def _on_reconnect(self, sender=None):
             conn = getattr(self._client, 'connection', None)
@@ -333,13 +345,54 @@ if _USE_RUMPS:
                 _set_host_ip(self._client, response.text)
 
         def _on_about(self, sender=None):
-            _show_about()
+            # Use native rumps alert — Tkinter crashes on macOS
+            # when rumps owns the main thread.
+            rumps.alert(
+                title=f'About {__app_name__} v{__version__}',
+                message=(
+                    f'{__description__}\n\n'
+                    f'Version {__version__}\n'
+                    f'A {_about_author} Product\n\n'
+                    f'{_about_website}\n'
+                    f'{_about_repo_url}'
+                ),
+                ok='Close',
+            )
 
         def _on_updates(self, sender=None):
-            _show_updates(self._update_info)
+            if self._update_info:
+                resp = rumps.alert(
+                    title='Update Available',
+                    message=(
+                        f'Current: v{self._update_info["current"]}\n'
+                        f'Latest:  v{self._update_info["latest"]}\n\n'
+                        f'Open the releases page to download?'
+                    ),
+                    ok='Open Releases',
+                    cancel='Cancel',
+                )
+                if resp == 1:
+                    import webbrowser
+                    webbrowser.open(self._update_info.get(
+                        'url', f'{_about_repo_url}/releases'))
+            else:
+                # Check inline and report
+                def _bg_check():
+                    from shared.updater import check_for_update
+                    info = check_for_update()
+                    if info:
+                        self.enqueue_update_info(info)
+                        self._ui_updates.put(('show_update_alert', info))
+                    else:
+                        rumps.notification(
+                            'UniCent', '',
+                            f'You are running the latest version (v{__version__}).'
+                        )
+                threading.Thread(target=_bg_check, daemon=True).start()
 
         def _on_bug_report(self, sender=None):
-            _show_bug_report()
+            import webbrowser
+            webbrowser.open(f'{_about_repo_url}/issues')
 
         def _on_quit(self, sender=None):
             self._client._running = False

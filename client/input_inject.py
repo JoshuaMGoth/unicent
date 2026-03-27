@@ -13,6 +13,7 @@ and translate them to the local platform representation.
 import logging
 import platform
 import subprocess
+import time
 from typing import Optional
 
 log = logging.getLogger(__name__)
@@ -30,21 +31,6 @@ class _MacOSInjector:
     def __init__(self):
         try:
             import Quartz
-            from Quartz import (
-                CGEventCreateMouseEvent,
-                CGEventCreateKeyboardEvent,
-                CGEventCreateScrollWheelEvent2,
-                CGEventPost,
-                CGEventSetIntegerValueField,
-                CGEventSetFlags,
-                CGDisplayBounds,
-                CGMainDisplayID,
-                CGWarpMouseCursorPosition,
-                CGAssociateMouseAndMouseCursorPosition,
-                CGEventSourceCreate,
-                kCGEventSourceStateHIDSystemState,
-                kCGHIDEventTap,
-            )
             self._Q = Quartz
         except ImportError:
             raise RuntimeError("pyobjc-framework-Quartz required: pip3 install pyobjc-framework-Quartz")
@@ -73,8 +59,102 @@ class _MacOSInjector:
         self._cursor_y: float = 0.0
         self._modifier_flags: int = 0
         self._buttons_pressed: set = set()
+        self._last_click_time: dict = {}
+        self._click_count: dict = {}
+        self._double_click_interval = 0.5
+        self._event_tap = None
+        self._tap_runloop_source = None
+        self._setup_event_tap()
         self._update_screen_bounds()
         self._init_cursor_position()
+
+    def _create_mouse_event(self, event_type: int, point, button: int):
+        """Create a mouse event using a NULL source.
+
+        Using None (NULL) as the source on macOS 26+ avoids hardware-origin
+        checks that can cause the window server to drop events with a
+        HID-system-state source when Accessibility trust is evaluated.
+        """
+        Q = self._Q
+        return Q.CGEventCreateMouseEvent(None, event_type, point, button)
+
+    def _setup_event_tap(self):
+        """Create a passive CGEventTap to register this process with macOS.
+
+        On macOS 26+, creating an event tap is what grants the process
+        ongoing permission to post synthetic events (especially clicks).
+        Without an active tap, CGEventPost for click events may silently
+        stop working mid-session after display sleep or security re-evaluation.
+        The tap itself is passive (listens only, does not modify events).
+        """
+        Q = self._Q
+        try:
+            mask = (
+                (1 << Q.kCGEventLeftMouseDown) |
+                (1 << Q.kCGEventLeftMouseUp) |
+                (1 << Q.kCGEventRightMouseDown) |
+                (1 << Q.kCGEventRightMouseUp) |
+                (1 << Q.kCGEventMouseMoved) |
+                (1 << Q.kCGEventLeftMouseDragged) |
+                (1 << Q.kCGEventRightMouseDragged) |
+                (1 << Q.kCGEventScrollWheel) |
+                (1 << Q.kCGEventKeyDown) |
+                (1 << Q.kCGEventKeyUp) |
+                (1 << Q.kCGEventFlagsChanged)
+            )
+            # passive tap (listenOnly) — does not intercept or modify events
+            self._event_tap = Q.CGEventTapCreate(
+                Q.kCGSessionEventTap,
+                Q.kCGHeadInsertEventTap,
+                Q.kCGEventTapOptionListenOnly,
+                mask,
+                self._tap_callback,
+                None,
+            )
+            if self._event_tap:
+                self._tap_runloop_source = Q.CFMachPortCreateRunLoopSource(
+                    None, self._event_tap, 0)
+                import threading
+                def _run_tap():
+                    Q.CFRunLoopAddSource(
+                        Q.CFRunLoopGetCurrent(),
+                        self._tap_runloop_source,
+                        Q.kCFRunLoopCommonModes)
+                    Q.CGEventTapEnable(self._event_tap, True)
+                    Q.CFRunLoopRun()
+                t = threading.Thread(target=_run_tap, daemon=True)
+                t.start()
+                log.info("Event tap created — click injection registered with macOS")
+            else:
+                log.warning("CGEventTapCreate returned None — "
+                            "Accessibility permission may not be granted")
+        except Exception as e:
+            log.warning(f"Could not create event tap: {e}")
+
+    @staticmethod
+    def _tap_callback(proxy, event_type, event, refcon):
+        """Passive tap callback — just pass events through unchanged."""
+        return event
+
+    def _post_event(self, event):
+        """Post an event at the HID tap level."""
+        if not event:
+            return
+        Q = self._Q
+        Q.CGEventPost(Q.kCGHIDEventTap, event)
+
+    def _post_click_event(self, event):
+        """Post a click event at the HID tap level.
+
+        The passive CGEventTap set up in _setup_event_tap gives this process
+        a continuous Accessibility permission grant on macOS 26+, so
+        CGEventPost(kCGHIDEventTap) works reliably for all click types
+        without any PID lookup overhead.
+        """
+        if not event:
+            return
+        Q = self._Q
+        Q.CGEventPost(Q.kCGHIDEventTap, event)
 
     def _update_screen_bounds(self):
         Q = self._Q
@@ -109,16 +189,28 @@ class _MacOSInjector:
             self._cursor_x = self._max_x / 2
             self._cursor_y = self._max_y / 2
 
-    def move_mouse_relative(self, dx: int, dy: int):
+    def _sync_cursor_from_system(self):
+        """Refresh cached cursor position from macOS global cursor state."""
         Q = self._Q
-        new_x = max(self._min_x, min(self._cursor_x + dx, self._max_x - 1))
-        new_y = max(self._min_y, min(self._cursor_y + dy, self._max_y - 1))
-        self._cursor_x = new_x
-        self._cursor_y = new_y
-        point = Q.CGPointMake(new_x, new_y)
+        try:
+            event = Q.CGEventCreate(None)
+            if event:
+                loc = Q.CGEventGetLocation(event)
+                self._cursor_x = loc.x
+                self._cursor_y = loc.y
+        except Exception:
+            pass
 
-        # On some macOS setups, posted relative move events are delivered but
-        # don't visibly move the cursor. A direct warp guarantees movement.
+    def _warp_and_notify(self, point, dx: int = 0, dy: int = 0):
+        """Move cursor via warp, then immediately post a synthetic move event.
+
+        CGWarpMouseCursorPosition moves the visible cursor but suppresses
+        the next *hardware* mouse-moved event.  Posting our own synthetic
+        move event right after the warp re-syncs AppKit's hit-testing,
+        because the suppression only affects hardware events, not synthetic
+        ones.  This is the technique Barrier / Synergy use.
+        """
+        Q = self._Q
         Q.CGWarpMouseCursorPosition(point)
         Q.CGAssociateMouseAndMouseCursorPosition(True)
 
@@ -130,49 +222,84 @@ class _MacOSInjector:
             et = Q.kCGEventOtherMouseDragged
         else:
             et = Q.kCGEventMouseMoved
-        event = Q.CGEventCreateMouseEvent(self._source, et, point, 0)
+
+        event = self._create_mouse_event(et, point, 0)
         if event:
             Q.CGEventSetIntegerValueField(event, Q.kCGMouseEventDeltaX, dx)
             Q.CGEventSetIntegerValueField(event, Q.kCGMouseEventDeltaY, dy)
-            Q.CGEventPost(Q.kCGHIDEventTap, event)
+            self._post_event(event)
+
+    def move_mouse_relative(self, dx: int, dy: int):
+        Q = self._Q
+        new_x = max(self._min_x, min(self._cursor_x + dx, self._max_x - 1))
+        new_y = max(self._min_y, min(self._cursor_y + dy, self._max_y - 1))
+        self._cursor_x = new_x
+        self._cursor_y = new_y
+        self._warp_and_notify(Q.CGPointMake(new_x, new_y), dx, dy)
 
     def move_mouse_absolute(self, x: int, y: int):
         Q = self._Q
         self._cursor_x = float(x)
         self._cursor_y = float(y)
-        point = Q.CGPointMake(x, y)
-        Q.CGWarpMouseCursorPosition(point)
-        Q.CGAssociateMouseAndMouseCursorPosition(True)
-        event = Q.CGEventCreateMouseEvent(self._source, Q.kCGEventMouseMoved, point, 0)
-        if event:
-            Q.CGEventPost(Q.kCGHIDEventTap, event)
+        self._warp_and_notify(Q.CGPointMake(x, y), 0, 0)
 
     def warp_cursor(self, x: int, y: int):
         Q = self._Q
         self._cursor_x = float(x)
         self._cursor_y = float(y)
-        point = Q.CGPointMake(x, y)
-        Q.CGWarpMouseCursorPosition(point)
-        Q.CGAssociateMouseAndMouseCursorPosition(True)
+        self._warp_and_notify(Q.CGPointMake(x, y), 0, 0)
 
     def mouse_button(self, linux_button: int, state: int):
         Q = self._Q
         mac_button = self._LINUX_BTN_TO_MACOS.get(linux_button, -1)
         if mac_button < 0:
             return
+        pressed = state in (1, 2)
+
         point = Q.CGPointMake(self._cursor_x, self._cursor_y)
+
+        # Track double-click state
+        if pressed:
+            now = time.monotonic()
+            last = self._last_click_time.get(mac_button, 0)
+            if (now - last) <= self._double_click_interval:
+                self._click_count[mac_button] = self._click_count.get(mac_button, 0) + 1
+            else:
+                self._click_count[mac_button] = 1
+            self._last_click_time[mac_button] = now
+        click_state = self._click_count.get(mac_button, 1)
+
         if mac_button == 0:
-            et = Q.kCGEventLeftMouseDown if state else Q.kCGEventLeftMouseUp
+            # Left click
+            et = Q.kCGEventLeftMouseDown if pressed else Q.kCGEventLeftMouseUp
+            event = self._create_mouse_event(et, point, 0)
         elif mac_button == 1:
-            et = Q.kCGEventRightMouseDown if state else Q.kCGEventRightMouseUp
+            # Right click — use native right-click events.
+            # CGEventPost(kCGHIDEventTap) with an active event tap delivers
+            # right-click reliably on macOS 26+ at the HID level.
+            et = Q.kCGEventRightMouseDown if pressed else Q.kCGEventRightMouseUp
+            event = self._create_mouse_event(et, point, 1)
         else:
-            et = Q.kCGEventOtherMouseDown if state else Q.kCGEventOtherMouseUp
-        event = Q.CGEventCreateMouseEvent(self._source, et, point, mac_button)
+            # Other buttons
+            et = Q.kCGEventOtherMouseDown if pressed else Q.kCGEventOtherMouseUp
+            event = self._create_mouse_event(et, point, mac_button)
+
         if event:
+            click_state_field = getattr(Q, 'kCGMouseEventClickState', None)
+            pressure_field = getattr(Q, 'kCGMouseEventPressure', None)
+            if click_state_field is not None:
+                Q.CGEventSetIntegerValueField(event, click_state_field, click_state)
+            if pressure_field is not None:
+                Q.CGEventSetIntegerValueField(event, pressure_field, 1 if pressed else 0)
             if mac_button > 1:
                 Q.CGEventSetIntegerValueField(event, Q.kCGMouseEventButtonNumber, mac_button)
-            Q.CGEventPost(Q.kCGHIDEventTap, event)
-        if state:
+            Q.CGEventSetFlags(event, self._modifier_flags)
+            self._post_click_event(event)
+        log.debug(
+            "macOS mouse_button injected linux=%s mac=%s state=%s at=(%s,%s)",
+            linux_button, mac_button, state, int(self._cursor_x), int(self._cursor_y)
+        )
+        if pressed:
             self._buttons_pressed.add(mac_button)
         else:
             self._buttons_pressed.discard(mac_button)
@@ -182,7 +309,7 @@ class _MacOSInjector:
         event = Q.CGEventCreateScrollWheelEvent2(
             self._source, Q.kCGScrollEventUnitPixel, 2, dy * 3, dx * 3)
         if event:
-            Q.CGEventPost(Q.kCGHIDEventTap, event)
+            self._post_event(event)
 
     def key_event(self, linux_keycode: int, state: int):
         Q = self._Q
@@ -196,7 +323,7 @@ class _MacOSInjector:
         event = Q.CGEventCreateKeyboardEvent(self._source, mac_keycode, key_down)
         if event:
             Q.CGEventSetFlags(event, self._modifier_flags)
-            Q.CGEventPost(Q.kCGHIDEventTap, event)
+            self._post_event(event)
 
     def _handle_modifier(self, linux_keycode: int, state: int):
         Q = self._Q
@@ -211,7 +338,7 @@ class _MacOSInjector:
         event = Q.CGEventCreateKeyboardEvent(self._source, mac_keycode, state == 1)
         if event:
             Q.CGEventSetFlags(event, self._modifier_flags)
-            Q.CGEventPost(Q.kCGHIDEventTap, event)
+            self._post_event(event)
 
     def reset_modifiers(self):
         Q = self._Q
@@ -220,7 +347,7 @@ class _MacOSInjector:
             if mkc >= 0:
                 event = Q.CGEventCreateKeyboardEvent(self._source, mkc, False)
                 if event:
-                    Q.CGEventPost(Q.kCGHIDEventTap, event)
+                    self._post_event(event)
         self._modifier_flags = 0
         self._buttons_pressed.clear()
 
@@ -233,26 +360,66 @@ class _MacOSInjector:
 
 
 # ────────────────────────────────────────────────────────────
-# Linux Input Injector (xdotool + python-xlib / xdg)
+# Linux Input Injector (python-xlib XTest preferred, xdotool fallback)
 # ────────────────────────────────────────────────────────────
 
 class _LinuxInjector:
-    """Injects input events on Linux using xdotool (X11/XWayland)."""
+    """Injects input events on Linux.
+
+    Primary:  python-xlib XTest extension — single persistent X11 connection,
+              zero subprocess overhead, correct double-click / right-click /
+              modifier tracking.
+    Fallback: xdotool subprocess (one process per event — higher latency,
+              no double-click, kept for compatibility only).
+    """
+
+    # evdev button code → X11 button number
+    _BTN_TO_X11 = {
+        272: 1,   # BTN_LEFT
+        273: 3,   # BTN_RIGHT
+        274: 2,   # BTN_MIDDLE
+        275: 8,   # BTN_SIDE  (back)
+        276: 9,   # BTN_EXTRA (forward)
+    }
+
+    # evdev modifier key codes (shift, ctrl, alt, meta — both sides)
+    _MODIFIER_EVDEV = {42, 54, 29, 97, 56, 100, 125, 126}
 
     def __init__(self):
         self._cursor_x: int = 0
         self._cursor_y: int = 0
         self._buttons_pressed: set = set()
         self._modifier_state: set = set()
-        self._has_xdotool = self._check_tool('xdotool')
-        self._has_ydotool = self._check_tool('ydotool')
+        self._display = None
+        self._X = None
+        self._xtest = None
 
-        from shared.keymap import LINUX_TO_MACOS, LINUX_BTN_TO_MACOS
-        # evdev key code → X11 keysym name mapping for xdotool
-        self._EVDEV_TO_XKEYSYM = self._build_evdev_to_xkeysym()
+        # ── Try python-xlib XTest first ──────────────────────────────────
+        try:
+            from Xlib import display as _xdisplay, X as _X
+            from Xlib.ext import xtest as _xtest
+            _d = _xdisplay.Display()
+            # Confirm XTest extension is present
+            if _d.query_extension('XTEST') is None:
+                raise RuntimeError("XTEST extension not available")
+            self._display = _d
+            self._X = _X
+            self._xtest = _xtest
+            log.info("Linux injector: using python-xlib XTest (zero subprocess latency)")
+        except Exception as e:
+            log.warning(
+                f"python-xlib XTest unavailable ({e}) — falling back to xdotool. "
+                "Install python-xlib for best performance: pip install python-xlib"
+            )
+            self._display = None
 
-        if not self._has_xdotool and not self._has_ydotool:
-            log.warning("Neither xdotool nor ydotool found — input injection limited")
+        # ── xdotool fallback bookkeeping ─────────────────────────────────
+        if not self._display:
+            self._has_xdotool = self._check_tool('xdotool')
+            self._has_ydotool = self._check_tool('ydotool')
+            self._EVDEV_TO_XKEYSYM = self._build_evdev_to_xkeysym()
+            if not self._has_xdotool and not self._has_ydotool:
+                log.warning("Neither python-xlib nor xdotool available — injection limited")
 
         self._init_cursor_position()
 
@@ -264,7 +431,7 @@ class _LinuxInjector:
             return False
 
     def _build_evdev_to_xkeysym(self):
-        """Map evdev key codes to X11 keysym names for xdotool."""
+        """Map evdev key codes to X11 keysym names for xdotool fallback."""
         return {
             1: 'Escape', 2: '1', 3: '2', 4: '3', 5: '4', 6: '5',
             7: '6', 8: '7', 9: '8', 10: '9', 11: '0',
@@ -290,7 +457,17 @@ class _LinuxInjector:
         }
 
     def _init_cursor_position(self):
-        if self._has_xdotool:
+        # python-xlib path: read the current pointer position from the X server
+        if self._display:
+            try:
+                data = self._display.screen().root.query_pointer()
+                self._cursor_x = data.root_x
+                self._cursor_y = data.root_y
+                return
+            except Exception:
+                pass
+        # xdotool fallback
+        if getattr(self, '_has_xdotool', False):
             try:
                 import re
                 result = subprocess.run(
@@ -307,10 +484,37 @@ class _LinuxInjector:
         self._cursor_x = 960
         self._cursor_y = 540
 
+    # ── python-xlib XTest helpers ─────────────────────────────────────────
+
+    def _xtest_motion(self, x: int, y: int):
+        """Warp cursor to absolute (x, y) via XTest with a single flush."""
+        X = self._X
+        self._xtest.fake_input(
+            self._display, X.MotionNotify, False, X.CurrentTime, X.NONE, x, y)
+        self._display.flush()
+
+    def _xtest_button(self, x11_btn: int, pressed: bool):
+        """Press or release an X11 mouse button via XTest."""
+        X = self._X
+        evt = X.ButtonPress if pressed else X.ButtonRelease
+        self._xtest.fake_input(self._display, evt, x11_btn, X.CurrentTime)
+        self._display.flush()
+
+    def _xtest_key(self, x11_keycode: int, pressed: bool):
+        """Press or release an X11 key via XTest."""
+        X = self._X
+        evt = X.KeyPress if pressed else X.KeyRelease
+        self._xtest.fake_input(self._display, evt, x11_keycode, X.CurrentTime)
+        self._display.flush()
+
+    # ── Public injection API ──────────────────────────────────────────────
+
     def move_mouse_relative(self, dx: int, dy: int):
         self._cursor_x += dx
         self._cursor_y += dy
-        if self._has_xdotool:
+        if self._display:
+            self._xtest_motion(self._cursor_x, self._cursor_y)
+        elif getattr(self, '_has_xdotool', False):
             try:
                 subprocess.Popen(
                     ['xdotool', 'mousemove', '--', str(self._cursor_x), str(self._cursor_y)],
@@ -321,7 +525,9 @@ class _LinuxInjector:
     def move_mouse_absolute(self, x: int, y: int):
         self._cursor_x = x
         self._cursor_y = y
-        if self._has_xdotool:
+        if self._display:
+            self._xtest_motion(x, y)
+        elif getattr(self, '_has_xdotool', False):
             try:
                 subprocess.Popen(
                     ['xdotool', 'mousemove', str(x), str(y)],
@@ -333,60 +539,81 @@ class _LinuxInjector:
         self.move_mouse_absolute(x, y)
 
     def mouse_button(self, linux_button: int, state: int):
-        btn_map = {272: 1, 273: 3, 274: 2, 275: 4, 276: 5}
-        xbtn = btn_map.get(linux_button)
-        if not xbtn:
-            return
-        if self._has_xdotool:
-            action = 'mousedown' if state else 'mouseup'
-            try:
-                subprocess.Popen(
-                    ['xdotool', action, str(xbtn)],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except Exception:
-                pass
-        if state:
+        pressed = bool(state)
+        if self._display:
+            x11_btn = self._BTN_TO_X11.get(linux_button)
+            if x11_btn is not None:
+                self._xtest_button(x11_btn, pressed)
+        elif getattr(self, '_has_xdotool', False):
+            # xdotool button map: left=1, middle=2, right=3, back=8, fwd=9
+            btn_map = {272: 1, 273: 3, 274: 2, 275: 8, 276: 9}
+            xbtn = btn_map.get(linux_button)
+            if xbtn is not None:
+                action = 'mousedown' if pressed else 'mouseup'
+                try:
+                    subprocess.Popen(
+                        ['xdotool', action, str(xbtn)],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except Exception:
+                    pass
+        if pressed:
             self._buttons_pressed.add(linux_button)
         else:
             self._buttons_pressed.discard(linux_button)
 
     def scroll(self, dx: int, dy: int):
-        if self._has_xdotool:
-            # xdotool click 4=scroll up, 5=scroll down, 6=left, 7=right
-            if dy > 0:
-                btn = '4'
-            elif dy < 0:
-                btn = '5'
-            elif dx > 0:
-                btn = '7'
-            elif dx < 0:
-                btn = '6'
-            else:
-                return
+        # X11 scroll buttons: 4=up, 5=down, 6=left, 7=right
+        if dy > 0:
+            btn = 4
+        elif dy < 0:
+            btn = 5
+        elif dx > 0:
+            btn = 7
+        elif dx < 0:
+            btn = 6
+        else:
+            return
+        clicks = max(1, min(abs(dy or dx), 10))
+        if self._display:
+            X = self._X
+            for _ in range(clicks):
+                self._xtest.fake_input(self._display, X.ButtonPress, btn, X.CurrentTime)
+                self._xtest.fake_input(self._display, X.ButtonRelease, btn, X.CurrentTime)
+            self._display.flush()
+        elif getattr(self, '_has_xdotool', False):
             try:
                 subprocess.Popen(
-                    ['xdotool', 'click', btn],
+                    ['xdotool', 'click', str(btn)],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             except Exception:
                 pass
 
     def key_event(self, linux_keycode: int, state: int):
-        keysym = self._EVDEV_TO_XKEYSYM.get(linux_keycode)
-        if not keysym:
-            return
-        if self._has_xdotool:
-            action = 'keydown' if state in (1, 2) else 'keyup'
-            try:
-                subprocess.Popen(
-                    ['xdotool', action, keysym],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except Exception:
-                pass
+        pressed = state in (1, 2)
+        if self._display:
+            # On Linux, X11 keycode = evdev keycode + 8 (universal offset)
+            x11_keycode = linux_keycode + 8
+            self._xtest_key(x11_keycode, pressed)
+        elif getattr(self, '_has_xdotool', False):
+            keysym = self._EVDEV_TO_XKEYSYM.get(linux_keycode)
+            if keysym:
+                action = 'keydown' if pressed else 'keyup'
+                try:
+                    subprocess.Popen(
+                        ['xdotool', action, keysym],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except Exception:
+                    pass
 
     def reset_modifiers(self):
-        for keysym in ['Shift_L', 'Shift_R', 'Control_L', 'Control_R',
-                       'Alt_L', 'Alt_R', 'Super_L', 'Super_R']:
-            if self._has_xdotool:
+        if self._display:
+            # Release all modifier keys: Shift, Ctrl, Alt, Meta (both sides)
+            for evdev_kc in self._MODIFIER_EVDEV:
+                x11_kc = evdev_kc + 8
+                self._xtest_key(x11_kc, False)
+        elif getattr(self, '_has_xdotool', False):
+            for keysym in ['Shift_L', 'Shift_R', 'Control_L', 'Control_R',
+                           'Alt_L', 'Alt_R', 'Super_L', 'Super_R']:
                 try:
                     subprocess.Popen(
                         ['xdotool', 'keyup', keysym],
@@ -537,6 +764,10 @@ def check_accessibility_permissions() -> bool:
     """Check if the app has the required permissions for input injection."""
     if _SYSTEM == 'Darwin':
         try:
+            import Quartz
+            if hasattr(Quartz, 'AXIsProcessTrusted'):
+                return bool(Quartz.AXIsProcessTrusted())
+            # Fallback for older bindings.
             from Quartz import CGEventCreateKeyboardEvent, CGEventSourceCreate, kCGEventSourceStateHIDSystemState
             source = CGEventSourceCreate(kCGEventSourceStateHIDSystemState)
             event = CGEventCreateKeyboardEvent(source, 0, False)
@@ -557,6 +788,14 @@ def check_accessibility_permissions() -> bool:
 def request_accessibility_permissions():
     """Prompt user to grant required permissions — GUI dialog on macOS."""
     if _SYSTEM == 'Darwin':
+        try:
+            import Quartz
+            opts_key = getattr(Quartz, 'kAXTrustedCheckOptionPrompt', None)
+            check_fn = getattr(Quartz, 'AXIsProcessTrustedWithOptions', None)
+            if opts_key is not None and check_fn is not None:
+                check_fn({opts_key: True})
+        except Exception:
+            pass
         _show_macos_accessibility_dialog()
     elif _SYSTEM == 'Linux':
         print("\n  ⚠  xdotool is required for input injection on Linux.")

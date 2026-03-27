@@ -358,25 +358,25 @@ class HostServer:
         self._buffer_write(self._active_client, data)
 
     def forward_mouse_button(self, button: int, state: int):
-        """Forward a mouse button event to the active client."""
+        """Forward a mouse button event to the active client immediately."""
         if not self._active_client:
             return
         data = encode_mouse_button(button, state)
-        self._buffer_write(self._active_client, data)
+        self._schedule_send(self._active_client, data)
 
     def forward_mouse_scroll(self, dx: int, dy: int):
-        """Forward a scroll event to the active client."""
+        """Forward a scroll event to the active client immediately."""
         if not self._active_client:
             return
         data = encode_mouse_scroll(dx, dy)
-        self._buffer_write(self._active_client, data)
+        self._schedule_send(self._active_client, data)
 
     def forward_key_event(self, keycode: int, state: int):
-        """Forward a key event to the active client."""
+        """Forward a key event to the active client immediately."""
         if not self._active_client:
             return
         data = encode_key_event(keycode, state)
-        self._buffer_write(self._active_client, data)
+        self._schedule_send(self._active_client, data)
 
     def send_cursor_warp(self, client_id: str, x: int, y: int):
         """Tell a client to warp its cursor to a position."""

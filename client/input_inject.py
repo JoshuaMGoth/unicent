@@ -79,37 +79,28 @@ class _MacOSInjector:
         return Q.CGEventCreateMouseEvent(None, event_type, point, button)
 
     def _setup_event_tap(self):
-        """Create an intercepting CGEventTap so macOS trusts this process to
-        post synthetic click events.
+        """Create a CGEventTap to keep this process registered with macOS.
 
-        A listen-only tap does NOT grant click-injection permission on macOS
-        26+.  Only an intercepting tap (kCGEventTapOptionDefault) gives the
-        process the trust level required for CGEventPost(kCGHIDEventTap) to
-        deliver click events.  The callback passes all events through unchanged
-        so there is no functional difference from the user's perspective.
-
-        macOS can disable the tap after display sleep or a security
-        re-evaluation.  The callback detects the disable signal and immediately
-        re-enables the tap so clicks keep working without a restart.
+        Tries intercepting tap first (best click support), falls back to
+        listen-only if Accessibility is not granted.  Either way, all event
+        posting uses kCGSessionEventTap which does not require Accessibility.
         """
         Q = self._Q
+        mask = (
+            (1 << Q.kCGEventLeftMouseDown) |
+            (1 << Q.kCGEventLeftMouseUp) |
+            (1 << Q.kCGEventRightMouseDown) |
+            (1 << Q.kCGEventRightMouseUp) |
+            (1 << Q.kCGEventMouseMoved) |
+            (1 << Q.kCGEventLeftMouseDragged) |
+            (1 << Q.kCGEventRightMouseDragged) |
+            (1 << Q.kCGEventScrollWheel) |
+            (1 << Q.kCGEventKeyDown) |
+            (1 << Q.kCGEventKeyUp) |
+            (1 << Q.kCGEventFlagsChanged)
+        )
         try:
-            mask = (
-                (1 << Q.kCGEventLeftMouseDown) |
-                (1 << Q.kCGEventLeftMouseUp) |
-                (1 << Q.kCGEventRightMouseDown) |
-                (1 << Q.kCGEventRightMouseUp) |
-                (1 << Q.kCGEventMouseMoved) |
-                (1 << Q.kCGEventLeftMouseDragged) |
-                (1 << Q.kCGEventRightMouseDragged) |
-                (1 << Q.kCGEventScrollWheel) |
-                (1 << Q.kCGEventKeyDown) |
-                (1 << Q.kCGEventKeyUp) |
-                (1 << Q.kCGEventFlagsChanged)
-            )
-            # Intercepting tap — passes events through unchanged but registers
-            # this process as trusted for CGEventPost(kCGHIDEventTap).
-            # Requires Accessibility permission in System Settings.
+            # Try intercepting tap first (requires Accessibility)
             self._event_tap = Q.CGEventTapCreate(
                 Q.kCGSessionEventTap,
                 Q.kCGHeadInsertEventTap,
@@ -118,6 +109,23 @@ class _MacOSInjector:
                 self._tap_callback,
                 None,
             )
+            if self._event_tap:
+                log.info("Intercepting event tap created (Accessibility granted)")
+            else:
+                # Fall back to listen-only tap (no Accessibility needed)
+                self._event_tap = Q.CGEventTapCreate(
+                    Q.kCGSessionEventTap,
+                    Q.kCGHeadInsertEventTap,
+                    Q.kCGEventTapOptionListenOnly,
+                    mask,
+                    self._tap_callback,
+                    None,
+                )
+                if self._event_tap:
+                    log.info("Listen-only event tap created (no Accessibility)")
+                else:
+                    log.warning("CGEventTapCreate returned None for both modes")
+
             if self._event_tap:
                 self._tap_runloop_source = Q.CFMachPortCreateRunLoopSource(
                     None, self._event_tap, 0)
@@ -131,60 +139,34 @@ class _MacOSInjector:
                     Q.CFRunLoopRun()
                 t = threading.Thread(target=_run_tap, daemon=True)
                 t.start()
-                log.info("Event tap created — click injection registered with macOS")
-            else:
-                log.warning(
-                    "CGEventTapCreate returned None — Accessibility permission "
-                    "not granted. Open System Settings → Privacy & Security → "
-                    "Accessibility and add this Python process, then restart."
-                )
-                # Open Accessibility settings pane automatically
-                try:
-                    import subprocess
-                    subprocess.Popen([
-                        'open',
-                        'x-apple.systempreferences:'
-                        'com.apple.preference.security?Privacy_Accessibility',
-                    ])
-                except Exception:
-                    pass
         except Exception as e:
             log.warning(f"Could not create event tap: {e}")
 
     def _tap_callback(self, proxy, event_type, event, refcon):
-        """Intercepting tap callback — pass events through unchanged.
-
-        macOS sends kCGEventTapDisabledByTimeout (0xFFFFFFFE) or
-        kCGEventTapDisabledByUserInput (0xFFFFFFFF) when it disables our tap.
-        We must call CGEventTapEnable to restore it, otherwise click injection
-        stops working until the process restarts.
-        """
-        # 0xFFFFFFFE = kCGEventTapDisabledByTimeout
-        # 0xFFFFFFFF = kCGEventTapDisabledByUserInput
+        """Tap callback — pass events through and re-enable if macOS disables."""
         if event_type in (0xFFFFFFFE, 0xFFFFFFFF) and self._event_tap:
             log.warning("Event tap was disabled by macOS — re-enabling")
             self._Q.CGEventTapEnable(self._event_tap, True)
         return event
 
     def _post_event(self, event):
-        """Post an event at the HID tap level."""
+        """Post an event at the session level."""
         if not event:
             return
         Q = self._Q
-        Q.CGEventPost(Q.kCGHIDEventTap, event)
+        Q.CGEventPost(Q.kCGSessionEventTap, event)
 
     def _post_click_event(self, event):
-        """Post a click event at the HID tap level.
+        """Post a click event at the session level.
 
-        The passive CGEventTap set up in _setup_event_tap gives this process
-        a continuous Accessibility permission grant on macOS 26+, so
-        CGEventPost(kCGHIDEventTap) works reliably for all click types
-        without any PID lookup overhead.
+        Using kCGSessionEventTap instead of kCGHIDEventTap avoids the
+        Accessibility permission requirement that causes clicks to be
+        silently dropped on macOS when the process is not trusted.
         """
         if not event:
             return
         Q = self._Q
-        Q.CGEventPost(Q.kCGHIDEventTap, event)
+        Q.CGEventPost(Q.kCGSessionEventTap, event)
 
     def _update_screen_bounds(self):
         Q = self._Q

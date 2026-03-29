@@ -86,6 +86,10 @@ class _MacOSInjector:
         Without an active tap, CGEventPost for click events may silently
         stop working mid-session after display sleep or security re-evaluation.
         The tap itself is passive (listens only, does not modify events).
+
+        macOS can disable the tap at any time (display sleep, reboot,
+        security re-evaluation). The callback detects the disable signal
+        and immediately re-enables the tap so clicks keep working.
         """
         Q = self._Q
         try:
@@ -131,9 +135,19 @@ class _MacOSInjector:
         except Exception as e:
             log.warning(f"Could not create event tap: {e}")
 
-    @staticmethod
-    def _tap_callback(proxy, event_type, event, refcon):
-        """Passive tap callback — just pass events through unchanged."""
+    def _tap_callback(self, proxy, event_type, event, refcon):
+        """Passive tap callback — pass events through and re-enable if disabled.
+
+        macOS sends kCGEventTapDisabledByTimeout (0xFFFFFFFE) or
+        kCGEventTapDisabledByUserInput (0xFFFFFFFF) when it disables our tap.
+        We must call CGEventTapEnable to restore it, otherwise synthetic
+        click events stop being delivered (especially on macOS 26+).
+        """
+        # 0xFFFFFFFE = kCGEventTapDisabledByTimeout
+        # 0xFFFFFFFF = kCGEventTapDisabledByUserInput
+        if event_type in (0xFFFFFFFE, 0xFFFFFFFF) and self._event_tap:
+            log.warning("Event tap was disabled by macOS — re-enabling")
+            self._Q.CGEventTapEnable(self._event_tap, True)
         return event
 
     def _post_event(self, event):

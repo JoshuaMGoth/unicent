@@ -79,17 +79,18 @@ class _MacOSInjector:
         return Q.CGEventCreateMouseEvent(None, event_type, point, button)
 
     def _setup_event_tap(self):
-        """Create a passive CGEventTap to register this process with macOS.
+        """Create an intercepting CGEventTap so macOS trusts this process to
+        post synthetic click events.
 
-        On macOS 26+, creating an event tap is what grants the process
-        ongoing permission to post synthetic events (especially clicks).
-        Without an active tap, CGEventPost for click events may silently
-        stop working mid-session after display sleep or security re-evaluation.
-        The tap itself is passive (listens only, does not modify events).
+        A listen-only tap does NOT grant click-injection permission on macOS
+        26+.  Only an intercepting tap (kCGEventTapOptionDefault) gives the
+        process the trust level required for CGEventPost(kCGHIDEventTap) to
+        deliver click events.  The callback passes all events through unchanged
+        so there is no functional difference from the user's perspective.
 
-        macOS can disable the tap at any time (display sleep, reboot,
-        security re-evaluation). The callback detects the disable signal
-        and immediately re-enables the tap so clicks keep working.
+        macOS can disable the tap after display sleep or a security
+        re-evaluation.  The callback detects the disable signal and immediately
+        re-enables the tap so clicks keep working without a restart.
         """
         Q = self._Q
         try:
@@ -106,11 +107,13 @@ class _MacOSInjector:
                 (1 << Q.kCGEventKeyUp) |
                 (1 << Q.kCGEventFlagsChanged)
             )
-            # passive tap (listenOnly) — does not intercept or modify events
+            # Intercepting tap — passes events through unchanged but registers
+            # this process as trusted for CGEventPost(kCGHIDEventTap).
+            # Requires Accessibility permission in System Settings.
             self._event_tap = Q.CGEventTapCreate(
                 Q.kCGSessionEventTap,
                 Q.kCGHeadInsertEventTap,
-                Q.kCGEventTapOptionListenOnly,
+                Q.kCGEventTapOptionDefault,
                 mask,
                 self._tap_callback,
                 None,
@@ -130,18 +133,31 @@ class _MacOSInjector:
                 t.start()
                 log.info("Event tap created — click injection registered with macOS")
             else:
-                log.warning("CGEventTapCreate returned None — "
-                            "Accessibility permission may not be granted")
+                log.warning(
+                    "CGEventTapCreate returned None — Accessibility permission "
+                    "not granted. Open System Settings → Privacy & Security → "
+                    "Accessibility and add this Python process, then restart."
+                )
+                # Open Accessibility settings pane automatically
+                try:
+                    import subprocess
+                    subprocess.Popen([
+                        'open',
+                        'x-apple.systempreferences:'
+                        'com.apple.preference.security?Privacy_Accessibility',
+                    ])
+                except Exception:
+                    pass
         except Exception as e:
             log.warning(f"Could not create event tap: {e}")
 
     def _tap_callback(self, proxy, event_type, event, refcon):
-        """Passive tap callback — pass events through and re-enable if disabled.
+        """Intercepting tap callback — pass events through unchanged.
 
         macOS sends kCGEventTapDisabledByTimeout (0xFFFFFFFE) or
         kCGEventTapDisabledByUserInput (0xFFFFFFFF) when it disables our tap.
-        We must call CGEventTapEnable to restore it, otherwise synthetic
-        click events stop being delivered (especially on macOS 26+).
+        We must call CGEventTapEnable to restore it, otherwise click injection
+        stops working until the process restarts.
         """
         # 0xFFFFFFFE = kCGEventTapDisabledByTimeout
         # 0xFFFFFFFF = kCGEventTapDisabledByUserInput
@@ -320,10 +336,23 @@ class _MacOSInjector:
 
     def scroll(self, dx: int, dy: int):
         Q = self._Q
-        event = Q.CGEventCreateScrollWheelEvent2(
-            self._source, Q.kCGScrollEventUnitPixel, 2, dy * 3, dx * 3)
-        if event:
-            self._post_event(event)
+        # CGEventCreateScrollWheelEvent2 with wheelCount=2 triggers a PyObjC
+        # binding error on some macOS versions ('Need 4 arguments, got 5').
+        # Use two separate single-axis events instead.
+        if dy:
+            event = Q.CGEventCreateScrollWheelEvent2(
+                self._source, Q.kCGScrollEventUnitPixel, 1, dy * 3)
+            if event:
+                self._post_event(event)
+        if dx:
+            event = Q.CGEventCreateScrollWheelEvent2(
+                self._source, Q.kCGScrollEventUnitPixel, 1, dx * 3)
+            if event:
+                Q.CGEventSetIntegerValueField(
+                    event, Q.kCGScrollWheelEventDeltaAxis2, dx * 3)
+                Q.CGEventSetIntegerValueField(
+                    event, Q.kCGScrollWheelEventDeltaAxis1, 0)
+                self._post_event(event)
 
     def key_event(self, linux_keycode: int, state: int):
         Q = self._Q

@@ -295,6 +295,7 @@ class UniCentHost:
                 self.server.forward_mouse_move(dx, dy)
 
     def _on_mouse_button(self, button: int, state: int):
+        log.info("HOST mouse_button button=%s state=%s controlling_remote=%s", button, state, self._controlling_remote)
         if self._controlling_remote:
             self.server.forward_mouse_button(button, state)
 

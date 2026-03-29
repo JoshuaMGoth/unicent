@@ -7,23 +7,19 @@
     <string>com.unicent.client</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/python3</string>
+        <string>/usr/local/share/unicent/.venv/bin/python3</string>
         <string>-m</string>
         <string>client.main</string>
         <string>--no-tls</string>
-        <string>-v</string>
     </array>
     <key>WorkingDirectory</key>
     <string>/usr/local/share/unicent</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
-    <dict>
-        <key>SuccessfulExit</key>
-        <false/>
-    </dict>
+    <true/>
     <key>ThrottleInterval</key>
-    <integer>10</integer>
+    <integer>5</integer>
     <key>StandardOutPath</key>
     <string>/tmp/unicent-client.log</string>
     <key>StandardErrorPath</key>

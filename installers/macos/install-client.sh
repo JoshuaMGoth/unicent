@@ -14,19 +14,27 @@ echo "  ╚═══════════════════════
 echo
 
 echo "  [1/5] Checking prerequisites..."
-if ! command -v python3 &>/dev/null; then
-    echo "  ✗ python3 not found. Install from https://python.org or via brew."
+if ! command -v git &>/dev/null; then
+    echo "  ⚙ Git not found — installing Xcode Command Line Tools..."
+    xcode-select --install 2>/dev/null || true
+    echo "  Please complete the Xcode install dialog, then re-run this script."
     exit 1
 fi
-if ! command -v git &>/dev/null; then
-    echo "  ✗ git not found. Install Xcode Command Line Tools:  xcode-select --install"
-    exit 1
+if ! command -v python3 &>/dev/null; then
+    if command -v brew &>/dev/null; then
+        echo "  ⚙ Python 3 not found — installing via Homebrew..."
+        brew install python3
+    else
+        echo "  ✗ python3 not found. Install from https://python.org or run: brew install python3"
+        exit 1
+    fi
 fi
 echo "  ✓ python3 and git found"
 
 echo "  [2/5] Cloning / updating UniCent..."
 if [[ -d "$INSTALL_DIR/.git" ]]; then
-    cd "$INSTALL_DIR" && git pull --ff-only
+    git -C "$INSTALL_DIR" stash 2>/dev/null || true
+    git -C "$INSTALL_DIR" pull --ff-only
 else
     sudo rm -rf "$INSTALL_DIR"
     sudo git clone "$REPO_URL" "$INSTALL_DIR"
@@ -39,16 +47,19 @@ cd "$INSTALL_DIR"
 if [[ ! -d ".venv" ]]; then
     python3 -m venv .venv
 fi
-.venv/bin/pip install --upgrade pip 2>/dev/null || true
-.venv/bin/pip install pyobjc-framework-Quartz rumps pystray Pillow
-echo "  ✓ Python packages installed (venv)"
+.venv/bin/pip install --upgrade pip --quiet 2>/dev/null || true
+.venv/bin/pip install --quiet pyobjc-framework-Quartz rumps pystray Pillow
+echo "  ✓ Python packages installed"
 
 echo "  [4/5] Setting up auto-start (LaunchAgent)..."
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
+# Fix ownership if root grabbed this dir
+if [[ -d "$LAUNCH_AGENTS_DIR" ]] && [[ "$(stat -f '%Su' "$LAUNCH_AGENTS_DIR")" == "root" ]]; then
+    sudo chown "$USER" "$LAUNCH_AGENTS_DIR"
+fi
 mkdir -p "$LAUNCH_AGENTS_DIR"
 cp "$INSTALL_DIR/autostart/com.unicent.client.plist" "$LAUNCH_AGENTS_DIR/"
 echo "  ✓ LaunchAgent installed"
-echo "  Note: To enable, run:  launchctl load ~/Library/LaunchAgents/com.unicent.client.plist"
 
 echo "  [5/5] Creating app bundle & launch script..."
 
@@ -152,12 +163,9 @@ cat > "$PLIST_PATH" << 'AGENT'
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
-    <dict>
-        <key>SuccessfulExit</key>
-        <false/>
-    </dict>
+    <true/>
     <key>ThrottleInterval</key>
-    <integer>10</integer>
+    <integer>5</integer>
     <key>StandardOutPath</key>
     <string>/tmp/unicent-client.log</string>
     <key>StandardErrorPath</key>

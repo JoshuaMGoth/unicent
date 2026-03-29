@@ -26,7 +26,7 @@ cat > "$APPS_DIR/unicent-client.desktop" <<EOF
 Type=Application
 Name=UniCent Client
 Comment=UniCent mouse and keyboard sharing client
-Exec=$PROJECT_DIR/run_client.sh --no-tls
+Exec=$PROJECT_DIR/run_client.sh --no-tls --host 100.107.164.122
 Path=$PROJECT_DIR
 Icon=$ICON_PATH
 Terminal=false

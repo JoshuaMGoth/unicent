@@ -126,8 +126,8 @@ class UniCentHost:
 
         # TLS
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        self.cert_file = cert_file or os.path.join(base_dir, 'certs', 'host.crt')
-        self.key_file = key_file or os.path.join(base_dir, 'certs', 'host.key')
+        self.cert_file = cert_file or os.path.join(base_dir, 'certs', 'server.crt')
+        self.key_file = key_file or os.path.join(base_dir, 'certs', 'server.key')
         self.ca_file = ca_file or os.path.join(base_dir, 'certs', 'ca.crt')
         if not use_tls:
             self.cert_file = self.key_file = self.ca_file = ''
@@ -149,7 +149,9 @@ class UniCentHost:
         self._last_switch_time: float = 0.0
         self._current_remote: str = ''
         self._host_return_intent: int = 0
-        self._host_return_threshold: int = 120
+        # Require a stronger, sustained edge push before auto-returning
+        # from client control back to host.
+        self._host_return_threshold: int = 220
 
         # Cooldown: ignore edge crossings for this long after returning to host
         self._last_host_return: float = 0.0
@@ -283,7 +285,9 @@ class UniCentHost:
                         break
                 self.server.forward_mouse_move(dx, dy)
 
-                if elapsed >= 0.5 and self._host_return_intent >= self._host_return_threshold:
+                # Hold remote control for at least 2 seconds after switch,
+                # then require sustained edge intent to return to host.
+                if elapsed >= 2.0 and self._host_return_intent >= self._host_return_threshold:
                     log.info(
                         f"[SWITCH] Returning to host "
                         f"(elapsed={elapsed:.3f}s, intent={self._host_return_intent})"

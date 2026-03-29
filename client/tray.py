@@ -20,7 +20,8 @@ from typing import Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from client.main import UniCentClient
 
-from shared.version import __version__, __app_name__, __author__, __website__, __repo_url__, __description__
+from shared.version import (__version__, __app_name__, __author__, __website__,
+                           __repo_url__, __description__, __troubleshooting_url__)
 
 log = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ log = logging.getLogger(__name__)
 _about_author = __author__
 _about_website = __website__
 _about_repo_url = __repo_url__
+_about_troubleshooting_url = __troubleshooting_url__
 
 _SYSTEM = platform.system()
 
@@ -154,6 +156,11 @@ def _show_updates(update_info=None):
         log.warning(f"Could not show Update dialog: {e}")
 
 
+def _open_troubleshooting():
+    import webbrowser
+    webbrowser.open(_about_troubleshooting_url)
+
+
 def _show_bug_report():
     try:
         from shared.dialogs import show_bug_report_dialog
@@ -262,6 +269,8 @@ if _USE_RUMPS:
                     callback=self._on_updates))
             items.append(rumps.MenuItem(
                 'Check for Updates...', callback=self._on_updates))
+            items.append(rumps.MenuItem(
+                'Troubleshooting...', callback=self._on_troubleshooting))
             items.append(rumps.MenuItem(
                 'Report a Bug...', callback=self._on_bug_report))
             items.append(None)
@@ -390,6 +399,10 @@ if _USE_RUMPS:
                         )
                 threading.Thread(target=_bg_check, daemon=True).start()
 
+        def _on_troubleshooting(self, sender=None):
+            import webbrowser
+            webbrowser.open(_about_troubleshooting_url)
+
         def _on_bug_report(self, sender=None):
             import webbrowser
             webbrowser.open(f'{_about_repo_url}/issues')
@@ -500,6 +513,8 @@ class _PystrayClientTray:
                 lambda: _show_updates(self._update_info)))
         items.append(MenuItem('Check for Updates...',
                               lambda: _show_updates(self._update_info)))
+        items.append(MenuItem('Troubleshooting...',
+                              lambda: _open_troubleshooting()))
         items.append(MenuItem('Report a Bug...',
                               lambda: _show_bug_report()))
         items.append(Menu.SEPARATOR)

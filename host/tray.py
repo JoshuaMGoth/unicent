@@ -31,7 +31,7 @@ from typing import Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from host.main import UniCentHost
 
-from shared.version import __version__, __app_name__
+from shared.version import __version__, __app_name__, __troubleshooting_url__
 
 log = logging.getLogger(__name__)
 
@@ -324,6 +324,8 @@ class HostTray:
             self._show_updates()
         elif action == 'show_bug_report':
             self._show_bug_report()
+        elif action == 'show_troubleshooting':
+            self._show_troubleshooting()
         elif action == 'quit':
             self._on_quit()
         elif action == 'error':
@@ -479,6 +481,7 @@ class HostTray:
         tools_items = [
             MenuItem('Settings...', lambda: self._show_settings()),
             MenuItem('Check for Updates...', lambda: self._show_updates()),
+            MenuItem('Troubleshooting...', lambda: self._show_troubleshooting()),
             MenuItem('Report a Bug...', lambda: self._show_bug_report()),
         ]
         items.append(MenuItem('Tools', Menu(*tools_items)))
@@ -567,6 +570,10 @@ class HostTray:
             show_update_dialog(update_info=self._update_info)
         except Exception as e:
             log.warning(f"Could not show Update dialog: {e}")
+
+    def _show_troubleshooting(self):
+        import webbrowser
+        webbrowser.open(__troubleshooting_url__)
 
     def _show_bug_report(self):
         try:

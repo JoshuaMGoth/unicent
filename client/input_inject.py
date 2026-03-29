@@ -99,12 +99,34 @@ class _MacOSInjector:
             (1 << Q.kCGEventKeyUp) |
             (1 << Q.kCGEventFlagsChanged)
         )
-        # Check Accessibility trust status
+        # Check Accessibility trust and prompt if not granted
         try:
             import ctypes, ctypes.util
+            import objc, CoreFoundation
             _sec = ctypes.cdll.LoadLibrary(ctypes.util.find_library("ApplicationServices"))
             _sec.AXIsProcessTrusted.restype = ctypes.c_bool
-            log.info("AXIsProcessTrusted=%s pid=%s", _sec.AXIsProcessTrusted(), __import__('os').getpid())
+            trusted = _sec.AXIsProcessTrusted()
+            log.info("AXIsProcessTrusted=%s pid=%s", trusted, __import__('os').getpid())
+            if not trusted:
+                # Trigger the macOS Accessibility permission prompt
+                log.info("Requesting Accessibility permission via system prompt...")
+                opts = CoreFoundation.CFDictionaryCreateMutable(
+                    None, 1,
+                    CoreFoundation.kCFTypeDictionaryKeyCallBacks,
+                    CoreFoundation.kCFTypeDictionaryValueCallBacks)
+                key = CoreFoundation.CFStringCreateWithCString(
+                    None, b"AXTrustedCheckOptionPrompt",
+                    CoreFoundation.kCFStringEncodingASCII)
+                CoreFoundation.CFDictionaryAddValue(
+                    opts, key, CoreFoundation.kCFBooleanTrue)
+                _sec.AXIsProcessTrustedWithOptions.restype = ctypes.c_bool
+                _sec.AXIsProcessTrustedWithOptions.argtypes = [ctypes.c_void_p]
+                _sec.AXIsProcessTrustedWithOptions(
+                    ctypes.c_void_p(objc.pyobjc_id(opts)))
+                log.warning(
+                    "Accessibility NOT granted — please enable it in "
+                    "System Settings > Privacy & Security > Accessibility "
+                    "for Python, then restart the client.")
         except Exception as e:
             log.warning("Could not check AXIsProcessTrusted: %s", e)
 

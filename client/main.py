@@ -242,7 +242,7 @@ class UniCentClient:
             self.injector.move_mouse_absolute(x, y)
 
     def _on_mouse_button(self, button: int, state: int):
-        log.debug("MOUSE_BUTTON received button=%s state=%s active=%s", button, state, self._active)
+        log.info("MOUSE_BUTTON received button=%s state=%s active=%s", button, state, self._active)
         if self._active and self.injector:
             self.injector.mouse_button(button, state)
 

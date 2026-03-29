@@ -99,6 +99,15 @@ class _MacOSInjector:
             (1 << Q.kCGEventKeyUp) |
             (1 << Q.kCGEventFlagsChanged)
         )
+        # Check Accessibility trust status
+        try:
+            import ctypes, ctypes.util
+            _sec = ctypes.cdll.LoadLibrary(ctypes.util.find_library("ApplicationServices"))
+            _sec.AXIsProcessTrusted.restype = ctypes.c_bool
+            log.info("AXIsProcessTrusted=%s pid=%s", _sec.AXIsProcessTrusted(), __import__('os').getpid())
+        except Exception as e:
+            log.warning("Could not check AXIsProcessTrusted: %s", e)
+
         try:
             # Try intercepting tap first (requires Accessibility)
             self._event_tap = Q.CGEventTapCreate(

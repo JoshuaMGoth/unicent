@@ -576,6 +576,15 @@ class UniCentHost:
         )
         print(f"\n  ✦ Client connected: {client_id}")
         self._print_layout()
+
+        # Force-connect behavior: when a client joins, immediately switch
+        # control to that client so users can recover from edge-detection
+        # issues after reboot without manual hotkeys.
+        try:
+            self._switch_to_machine(client_id)
+        except Exception as e:
+            log.warning(f"Auto switch-to-client failed: {e}")
+
         if self.tray:
             self.tray.update_menu()
 

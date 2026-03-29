@@ -248,7 +248,10 @@ class UniCentClient:
 
     def _on_mouse_scroll(self, dx: int, dy: int):
         if self._active and self.injector:
-            self.injector.scroll(dx, dy)
+            # Temporarily disable remote scroll injection on macOS because
+            # current Quartz wheel binding intermittently throws in PyObjC
+            # and can flood dispatch errors that interfere with click timing.
+            return
 
     def _on_key_event(self, keycode: int, state: int):
         if self._active and self.injector:

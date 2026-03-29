@@ -270,41 +270,22 @@ class _MacOSInjector:
 
         point = Q.CGPointMake(self._cursor_x, self._cursor_y)
 
-        # Track double-click state
-        if pressed:
-            now = time.monotonic()
-            last = self._last_click_time.get(mac_button, 0)
-            if (now - last) <= self._double_click_interval:
-                self._click_count[mac_button] = self._click_count.get(mac_button, 0) + 1
-            else:
-                self._click_count[mac_button] = 1
-            self._last_click_time[mac_button] = now
-        click_state = self._click_count.get(mac_button, 1)
-
         if mac_button == 0:
-            # Left click
             et = Q.kCGEventLeftMouseDown if pressed else Q.kCGEventLeftMouseUp
             event = self._create_mouse_event(et, point, 0)
         elif mac_button == 1:
-            # Right click — use native right-click events.
-            # CGEventPost(kCGHIDEventTap) with an active event tap delivers
-            # right-click reliably on macOS 26+ at the HID level.
             et = Q.kCGEventRightMouseDown if pressed else Q.kCGEventRightMouseUp
             event = self._create_mouse_event(et, point, 1)
         else:
-            # Other buttons
             et = Q.kCGEventOtherMouseDown if pressed else Q.kCGEventOtherMouseUp
             event = self._create_mouse_event(et, point, mac_button)
 
         if event:
+            # Keep click events minimal and explicit for macOS reliability.
+            Q.CGEventSetIntegerValueField(event, Q.kCGMouseEventButtonNumber, mac_button)
             click_state_field = getattr(Q, 'kCGMouseEventClickState', None)
-            pressure_field = getattr(Q, 'kCGMouseEventPressure', None)
             if click_state_field is not None:
-                Q.CGEventSetIntegerValueField(event, click_state_field, click_state)
-            if pressure_field is not None:
-                Q.CGEventSetIntegerValueField(event, pressure_field, 1 if pressed else 0)
-            if mac_button > 1:
-                Q.CGEventSetIntegerValueField(event, Q.kCGMouseEventButtonNumber, mac_button)
+                Q.CGEventSetIntegerValueField(event, click_state_field, 1)
             Q.CGEventSetFlags(event, self._modifier_flags)
             self._post_click_event(event)
         log.debug(

@@ -262,7 +262,7 @@ class UniCentHost:
             # Brief cooldown after returning from remote prevents re-triggering
             # while the physical cursor is still near the screen edge.
             self.layout.move_cursor(dx, dy)
-            if time.time() - self._last_host_return > 1.0:
+            if time.time() - self._last_host_return > 0.2:
                 new_machine = self.layout.active_machine
                 if new_machine != 'host':
                     log.info(f"Edge crossing → {new_machine}")
@@ -296,6 +296,14 @@ class UniCentHost:
 
     def _on_mouse_button(self, button: int, state: int):
         log.info("HOST mouse_button button=%s state=%s controlling_remote=%s", button, state, self._controlling_remote)
+        # Safety handoff: if layout already points at a client but the
+        # mode has not switched yet, promote on click-down so the click
+        # is delivered to the intended remote machine.
+        if not self._controlling_remote and state == 1:
+            target = self.layout.active_machine
+            if target != 'host' and target in self.server.clients:
+                log.info("Promoting click handoff → %s", target)
+                self._switch_to_machine(target)
         if self._controlling_remote:
             self.server.forward_mouse_button(button, state)
 

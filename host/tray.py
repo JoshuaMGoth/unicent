@@ -412,7 +412,7 @@ class HostTray:
             idx = i + 1
             items.append(MenuItem(
                 label,
-                lambda _item=None, _idx=idx:
+                lambda *_args, _idx=idx:
                     self.host._hotkey_switch_to(_idx)))
 
         if not clients:
